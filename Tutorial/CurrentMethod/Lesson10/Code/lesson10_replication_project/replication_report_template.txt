@@ -1,0 +1,29 @@
+Mini Replication Report Template
+=================================
+
+1. Goal of the experiment
+   - Briefly explain what you tried to do in this mini replication.
+
+2. Dataset description
+   - How many speakers and utterances are there?
+   - What are the main acoustic features used?
+
+3. Methods
+   - What evaluation strategy did you use (e.g., LOSO)?
+   - Which models did you compare (e.g., Logistic Regression, Random Forest)?
+
+4. Results
+   - Report mean accuracy, precision, recall, F1 for each model.
+   - Summarize the confusion matrices in words.
+
+5. Interpretation
+   - Which model performed better overall?
+   - Did any speakers seem particularly hard to predict?
+   - What might explain differences between models?
+
+6. Connection to the research paper
+   - How does this pipeline relate to the paper's approach?
+   - What steps would change if you used the real dataset and code from the paper?
+
+7. Future work
+   - List at least two ideas for improving the model or experiment.
