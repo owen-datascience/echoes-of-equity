@@ -25,9 +25,13 @@ y = data['Speaker_Intent']
 # 4. Preprocessing: Address any Infinite or missing values in acoustic metrics
 X = X.replace([np.inf, -np.inf], np.nan).fillna(X.mean())
 
-# 5. Stratified Splitting: Maintain demographic intent balance between sets
+# 5. Joint Stratified Splitting: balance BOTH intent AND ethnicity in train/test.
+# Stratifying on intent alone would let test-set ethnicity drift away from
+# train-set proportions and inflate per-demographic accuracy variance.
+_eth_codes = LabelEncoder().fit_transform(data['Speaker_Ethnicity'])
+_strata = y.values * 10 + _eth_codes  # 6 cells: 2 intents x 3 ethnicities
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42
+    X, y, test_size=0.2, stratify=_strata, random_state=42
 )
 
 # 6. Scaling: Logistic Regression is sensitive to the scale of features

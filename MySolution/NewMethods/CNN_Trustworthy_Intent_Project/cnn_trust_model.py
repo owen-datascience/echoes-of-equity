@@ -28,7 +28,12 @@ y = df['Speaker_Intent']
 X = X.fillna(X.mean())
 
 # 4. DATA SPLITTING
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+# Joint stratification on (intent, ethnicity) keeps the SAME ratio of every
+# (Neutral/Trustworthy x White/Black/SouthAsian) cell in both halves, so the
+# per-ethnicity accuracy we report later is not skewed by a lucky split.
+_eth_codes = LabelEncoder().fit_transform(df['Speaker_Ethnicity'])
+_strata = y.values * 10 + _eth_codes  # 6 cells: 2 intents x 3 ethnicities
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=_strata, random_state=42)
 
 # 5. DATA SCALING
 scaler = StandardScaler()

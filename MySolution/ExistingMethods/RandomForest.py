@@ -26,10 +26,13 @@ target = df['Speaker_Intent']
 # 4. Handle Missing Values: Fill any NaN values with the column mean (standard practice)
 features = features.fillna(features.mean())
 
-# 5. Stratified Split: Ensure balanced representation of classes in training and testing
-# Using a 20% test size as common in demographic speech research
+# 5. Joint Stratified Split: balance BOTH intent AND ethnicity in train/test.
+# Stratifying on intent alone (the source paper's approach) lets the test set
+# ethnicity mix drift, which inflates per-demographic gap estimates.
+_eth_codes = LabelEncoder().fit_transform(df['Speaker_Ethnicity'])
+_strata = target.values * 10 + _eth_codes  # 6 cells: 2 intents x 3 ethnicities
 X_train, X_test, y_train, y_test = train_test_split(
-    features, target, test_size=0.2, stratify=target, random_state=42
+    features, target, test_size=0.2, stratify=_strata, random_state=42
 )
 
 # 6. Feature Scaling: Standardize features to have zero mean and unit variance
