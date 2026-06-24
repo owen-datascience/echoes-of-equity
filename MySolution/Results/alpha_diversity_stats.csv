@@ -1,0 +1,13 @@
+metric,test,comparison,statistic,p_value,significant
+shannon,Kruskal-Wallis,All groups,301.7059,0.0,True
+shannon,Mann-Whitney U (Bonferroni),Breast vs Colorectal,8317.0,0.0,True
+shannon,Mann-Whitney U (Bonferroni),Breast vs Prostate,5993.0,0.15403,False
+shannon,Mann-Whitney U (Bonferroni),Colorectal vs Prostate,7808.0,0.0,True
+observed_otus,Kruskal-Wallis,All groups,339.5721,0.0,True
+observed_otus,Mann-Whitney U (Bonferroni),Breast vs Colorectal,78893.5,0.0,True
+observed_otus,Mann-Whitney U (Bonferroni),Breast vs Prostate,3567.0,0.031348,True
+observed_otus,Mann-Whitney U (Bonferroni),Colorectal vs Prostate,21.0,0.0,True
+simpson,Kruskal-Wallis,All groups,348.0355,0.0,True
+simpson,Mann-Whitney U (Bonferroni),Breast vs Colorectal,5117.0,0.0,True
+simpson,Mann-Whitney U (Bonferroni),Breast vs Prostate,1198.0,0.0,True
+simpson,Mann-Whitney U (Bonferroni),Colorectal vs Prostate,3888.0,1.0,False
