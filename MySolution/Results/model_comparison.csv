@@ -1,5 +1,0 @@
-Model,CV_Accuracy,CV_Accuracy_Std,CV_Balanced_Accuracy,CV_Macro_F1,CV_Macro_AUC,CV_Macro_AUC_Std,Best_Model
-SVM (RBF),0.9964,0.0073,0.9965,0.9971,1.0,0.0,YES
-Random Forest,0.9818,0.0163,0.9432,0.9615,0.9998,0.0003,
-XGBoost,0.9819,0.0161,0.9543,0.9598,0.9994,0.0008,
-Logistic Regression (L1),0.9856,0.0134,0.9789,0.9782,0.9991,0.0018,

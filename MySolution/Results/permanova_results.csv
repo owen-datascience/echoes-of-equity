@@ -1,5 +1,0 @@
-comparison,F,R2,p_value,significant
-All groups,143.9388,0.3188,0.001,True
-Breast vs Colorectal,269.8878,0.3157,0.001,True
-Breast vs Prostate,27.8356,0.0741,0.001,True
-Colorectal vs Prostate,46.6038,0.1356,0.001,True
