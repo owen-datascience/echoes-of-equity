@@ -228,6 +228,134 @@ def make_fig13_pareto(results):
 
 
 # ---------------------------------------------------------------------------
+# Fig 10: per-age-group and per-sex accuracy bar charts (paired axes)
+# ---------------------------------------------------------------------------
+AGE_ORDER = ["Younger", "Older"]
+SEX_ORDER = ["Female", "Male"]
+
+
+def _grouped_bar(ax, results, group_order, mean_key, std_key, title, ylim):
+    n_groups = len(group_order)
+    n_models = len(MODEL_ORDER)
+    bar_w = 0.15
+    x = np.arange(n_groups)
+    for i, m in enumerate(MODEL_ORDER):
+        r = results[m]
+        means = [r[mean_key].get(g, np.nan) * 100 for g in group_order]
+        stds = [r[std_key].get(g, 0.0) * 100 for g in group_order]
+        offsets = x + (i - (n_models - 1) / 2) * bar_w
+        ax.bar(offsets, means, bar_w, yerr=stds, capsize=3,
+               label=m, color=MODEL_COLORS[m], edgecolor="black", linewidth=0.4)
+    ax.set_xticks(x)
+    ax.set_xticklabels(group_order)
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_ylim(*ylim)
+    ax.set_title(title, fontsize=11)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def make_fig10_acc_by_age_sex(results):
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    _grouped_bar(axes[0], results, AGE_ORDER,
+                 "per_age_acc_mean", "per_age_acc_std",
+                 "Per-age-group accuracy", (55, 90))
+    _grouped_bar(axes[1], results, SEX_ORDER,
+                 "per_sex_acc_mean", "per_sex_acc_std",
+                 "Per-sex accuracy", (55, 90))
+    axes[1].legend(loc="upper right", ncol=5, frameon=False, fontsize=9)
+    fig.suptitle("Fig. 10  Per-age-group and per-sex trust accuracy "
+                 "(mean +/- std over 5 seeds).",
+                 y=1.02, fontsize=11)
+    fig.tight_layout()
+    out = os.path.join(FIG_DIR, "fig10_acc_by_age_sex.png")
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"Saved {out}")
+
+
+# ---------------------------------------------------------------------------
+# Fig 11: per-model confusion matrices (1 x 5 grid of heatmaps)
+# ---------------------------------------------------------------------------
+def make_fig11_confusion_matrices(results):
+    fig, axes = plt.subplots(1, len(MODEL_ORDER), figsize=(15, 3.6))
+    class_labels = ["Neutral", "Trustworthy"]
+    for ax, m in zip(axes, MODEL_ORDER):
+        cm = np.array(results[m]["confusion_matrix_mean"], dtype=float)
+        cm_pct = cm / cm.sum() * 100 if cm.sum() > 0 else cm
+        sns.heatmap(cm, annot=True, fmt=".1f", cmap="Blues",
+                    cbar=False, square=True,
+                    xticklabels=class_labels, yticklabels=class_labels, ax=ax)
+        # Overlay percentage-of-total in each cell below the raw count.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(j + 0.5, i + 0.72, f"({cm_pct[i, j]:.1f}%)",
+                        ha="center", va="center", fontsize=8,
+                        color="dimgray")
+        ax.set_title(m, fontsize=11)
+        ax.set_xlabel("Predicted")
+        if ax is axes[0]:
+            ax.set_ylabel("True")
+        else:
+            ax.set_ylabel("")
+    fig.suptitle("Fig. 11  Confusion matrices on the held-out test set, "
+                 "averaged over 5 seeds.  Rows: true label; columns: prediction.",
+                 y=1.05, fontsize=11)
+    fig.tight_layout()
+    out = os.path.join(FIG_DIR, "fig11_confusion_matrices.png")
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"Saved {out}")
+
+
+# ---------------------------------------------------------------------------
+# Fig 12: top-15 RF feature importances (horizontal bar chart)
+# ---------------------------------------------------------------------------
+def _prettify_feature_name(name):
+    # Trim VoiceLab's parenthetical Praat-source tags for legibility.
+    for tag in ["_(Praat_To_Pitch_(ac))", "_Voice_Sauce", "_Praat"]:
+        name = name.replace(tag, "")
+    return name.replace("_", " ")
+
+
+def make_fig12_feature_importance(results):
+    rf = results.get("RF", {})
+    fi_mean = rf.get("feature_importances_mean")
+    fi_std = rf.get("feature_importances_std")
+    feat_names = results.get("_feature_names")
+    if fi_mean is None or feat_names is None:
+        print("Skipping Fig 12: RF feature importances not found in results.json "
+              "(re-run compare_all_models.py to populate them).")
+        return
+    fi_mean = np.array(fi_mean)
+    fi_std = np.array(fi_std) if fi_std is not None else np.zeros_like(fi_mean)
+    order = np.argsort(fi_mean)[::-1][:15]
+    top_names = [_prettify_feature_name(feat_names[i]) for i in order]
+    top_vals = fi_mean[order]
+    top_errs = fi_std[order]
+
+    fig, ax = plt.subplots(figsize=(8.5, 6))
+    y = np.arange(len(top_names))
+    ax.barh(y, top_vals, xerr=top_errs, color=MODEL_COLORS["RF"],
+            edgecolor="black", linewidth=0.4, capsize=3)
+    ax.set_yticks(y)
+    ax.set_yticklabels(top_names)
+    ax.invert_yaxis()
+    ax.set_xlabel("Random Forest Gini importance (mean +/- std over 5 seeds)")
+    ax.set_title("Fig. 12  Top-15 acoustic features driving RF trust "
+                 "classification.\nF0, HNR and shimmer/CPP dominate; "
+                 "LTAS features rank low.", fontsize=11)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    out = os.path.join(FIG_DIR, "fig12_feature_importance.png")
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"Saved {out}")
+
+
+# ---------------------------------------------------------------------------
 # Main: generate all figures
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -243,6 +371,9 @@ if __name__ == "__main__":
     make_fig02_demographics()
     make_fig03_feature_boxplots()
     make_fig09_acc_by_ethnicity(results)
+    make_fig10_acc_by_age_sex(results)
+    make_fig11_confusion_matrices(results)
+    make_fig12_feature_importance(results)
     make_fig13_pareto(results)
 
     print("\nAll figures written.")

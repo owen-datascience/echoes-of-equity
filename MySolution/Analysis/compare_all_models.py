@@ -29,7 +29,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 
 # Five seeds keeps the table small while giving meaningful std estimates.
 SEEDS = [42, 43, 44, 45, 46]
@@ -94,14 +94,18 @@ X_df = df.drop(columns=META_COLS)
 X_df = X_df.replace([np.inf, -np.inf], np.nan).fillna(X_df.mean())
 
 X = X_df.values.astype(np.float32)
+FEATURE_NAMES = X_df.columns.tolist()
 y_trust = df["y_trust"].values.astype(np.float32)
 y_ethn = df["y_ethn"].values.astype(np.int32)
 ethn_str = df["Speaker_Ethnicity"].values
+age_str = df["Speaker_AgeGroup"].values
+sex_str = df["Speaker_Sex"].values
 
 # Joint stratification: 2 intents * 3 ethnicities = 6 cells, balanced across split.
 strata = (y_trust.astype(int) * 10 + y_ethn).astype(int)
-X_tr, X_te, yt_tr, yt_te, ye_tr, ye_te, es_tr, es_te = train_test_split(
-    X, y_trust, y_ethn, ethn_str,
+(X_tr, X_te, yt_tr, yt_te, ye_tr, ye_te,
+ es_tr, es_te, ag_tr, ag_te, sx_tr, sx_te) = train_test_split(
+    X, y_trust, y_ethn, ethn_str, age_str, sex_str,
     test_size=0.2, stratify=strata, random_state=SPLIT_SEED,
 )
 
@@ -130,10 +134,17 @@ def _seed_all(seed):
     tf.random.set_seed(seed)
 
 
+# RF feature-importance vectors (one per seed), captured as a side-effect so
+# every runner keeps the uniform (probs, preds) return contract.  Fig. 12
+# and the DANN "top-15 features only" ablation read from here.
+rf_fi_per_seed = []
+
+
 def run_rf(seed):
     _seed_all(seed)
     m = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=seed)
     m.fit(X_tr_s, yt_tr)
+    rf_fi_per_seed.append(m.feature_importances_.tolist())
     return m.predict_proba(X_te_s)[:, 1], m.predict(X_te_s).astype(np.int32)
 
 
@@ -224,33 +235,50 @@ MODELS = [
     ("DANN", run_dann),
 ]
 ETH_ORDER = ["White", "Black", "South_Asian"]
+AGE_ORDER = ["Younger", "Older"]
+SEX_ORDER = ["Female", "Male"]
 
 
-def _eval_one(probs, preds):
-    """Return overall + per-ethnicity metrics for a single run."""
-    overall_acc = float(accuracy_score(yt_te, preds))
-    overall_auc = float(roc_auc_score(yt_te, probs))
-    per_eth = {}
-    for e in ethn_enc.classes_:
-        mask = (es_te == e)
+def _slice_metrics(group_arr, group_values, probs, preds):
+    """Per-group {n, acc, auc} for one demographic axis, plus max-min gap in pp."""
+    per_group = {}
+    for g in group_values:
+        mask = (group_arr == g)
         if mask.sum() < 2:
             continue
         try:
             g_auc = float(roc_auc_score(yt_te[mask], probs[mask]))
         except ValueError:
             g_auc = float("nan")
-        per_eth[e] = {
+        per_group[g] = {
             "n": int(mask.sum()),
             "acc": float(accuracy_score(yt_te[mask], preds[mask])),
             "auc": g_auc,
         }
-    accs = [v["acc"] for v in per_eth.values()]
+    accs = [v["acc"] for v in per_group.values()]
     gap_pp = (max(accs) - min(accs)) * 100 if accs else 0.0
+    return per_group, gap_pp
+
+
+def _eval_one(probs, preds):
+    """Return overall + per-ethnicity/age/sex metrics and confusion matrix."""
+    overall_acc = float(accuracy_score(yt_te, preds))
+    overall_auc = float(roc_auc_score(yt_te, probs))
+    per_eth, gap_eth_pp = _slice_metrics(es_te, ethn_enc.classes_, probs, preds)
+    per_age, gap_age_pp = _slice_metrics(ag_te, AGE_ORDER, probs, preds)
+    per_sex, gap_sex_pp = _slice_metrics(sx_te, SEX_ORDER, probs, preds)
+    # sklearn returns [[TN, FP], [FN, TP]] for labels=[0, 1].
+    cm = confusion_matrix(yt_te.astype(int), preds, labels=[0, 1]).tolist()
     return {
         "overall_acc": overall_acc,
         "overall_auc": overall_auc,
         "per_eth": per_eth,
-        "gap_pp": gap_pp,
+        "per_age": per_age,
+        "per_sex": per_sex,
+        "gap_pp": gap_eth_pp,
+        "gap_age_pp": gap_age_pp,
+        "gap_sex_pp": gap_sex_pp,
+        "confusion_matrix": cm,
     }
 
 
@@ -268,10 +296,28 @@ for name, fn in MODELS:
     overall_accs = [r["overall_acc"] for r in per_seed]
     overall_aucs = [r["overall_auc"] for r in per_seed]
     gaps = [r["gap_pp"] for r in per_seed]
-    per_eth_acc = {e: [r["per_eth"][e]["acc"] for r in per_seed if e in r["per_eth"]]
-                   for e in ethn_enc.classes_}
-    per_eth_auc = {e: [r["per_eth"][e]["auc"] for r in per_seed if e in r["per_eth"]]
-                   for e in ethn_enc.classes_}
+    gaps_age = [r["gap_age_pp"] for r in per_seed]
+    gaps_sex = [r["gap_sex_pp"] for r in per_seed]
+
+    def _slice_agg(slice_key, group_values):
+        acc_lists = {g: [r[slice_key][g]["acc"] for r in per_seed if g in r[slice_key]]
+                     for g in group_values}
+        auc_lists = {g: [r[slice_key][g]["auc"] for r in per_seed if g in r[slice_key]]
+                     for g in group_values}
+        return (
+            {g: float(np.mean(v)) for g, v in acc_lists.items() if v},
+            {g: float(np.std(v)) for g, v in acc_lists.items() if v},
+            {g: float(np.nanmean(v)) for g, v in auc_lists.items() if v},
+            {g: float(np.nanstd(v)) for g, v in auc_lists.items() if v},
+        )
+
+    eth_acc_mu, eth_acc_sd, eth_auc_mu, eth_auc_sd = _slice_agg("per_eth", ethn_enc.classes_)
+    age_acc_mu, age_acc_sd, age_auc_mu, age_auc_sd = _slice_agg("per_age", AGE_ORDER)
+    sex_acc_mu, sex_acc_sd, sex_auc_mu, sex_auc_sd = _slice_agg("per_sex", SEX_ORDER)
+
+    # Mean confusion matrix over seeds, elementwise (stored as list-of-lists).
+    cm_stack = np.array([r["confusion_matrix"] for r in per_seed], dtype=float)
+    cm_mean = cm_stack.mean(axis=0).tolist()
 
     all_results[name] = {
         "n_seeds": len(SEEDS),
@@ -282,10 +328,17 @@ for name, fn in MODELS:
         "overall_auc_std": float(np.std(overall_aucs)),
         "gap_pp_mean": float(np.mean(gaps)),
         "gap_pp_std": float(np.std(gaps)),
-        "per_eth_acc_mean": {e: float(np.mean(v)) for e, v in per_eth_acc.items() if v},
-        "per_eth_acc_std": {e: float(np.std(v)) for e, v in per_eth_acc.items() if v},
-        "per_eth_auc_mean": {e: float(np.nanmean(v)) for e, v in per_eth_auc.items() if v},
-        "per_eth_auc_std": {e: float(np.nanstd(v)) for e, v in per_eth_auc.items() if v},
+        "gap_age_pp_mean": float(np.mean(gaps_age)),
+        "gap_age_pp_std": float(np.std(gaps_age)),
+        "gap_sex_pp_mean": float(np.mean(gaps_sex)),
+        "gap_sex_pp_std": float(np.std(gaps_sex)),
+        "per_eth_acc_mean": eth_acc_mu, "per_eth_acc_std": eth_acc_sd,
+        "per_eth_auc_mean": eth_auc_mu, "per_eth_auc_std": eth_auc_sd,
+        "per_age_acc_mean": age_acc_mu, "per_age_acc_std": age_acc_sd,
+        "per_age_auc_mean": age_auc_mu, "per_age_auc_std": age_auc_sd,
+        "per_sex_acc_mean": sex_acc_mu, "per_sex_acc_std": sex_acc_sd,
+        "per_sex_auc_mean": sex_auc_mu, "per_sex_auc_std": sex_auc_sd,
+        "confusion_matrix_mean": cm_mean,
         "raw_per_seed": per_seed,
     }
 
@@ -324,6 +377,45 @@ for name, r in all_results.items():
     print(f"{name:<6} " + "  ".join(f"{c:>18}" for c in cells))
 
 print("\nReference (source paper, LOSO-CV): RF 71% overall, 5pp gap")
+
+
+def _print_slice_table(title, slice_key_mean, slice_key_std, group_order):
+    print("\n" + "=" * 96)
+    print(f"{title}  (mean +/- std over {len(SEEDS)} seeds)")
+    print("=" * 96)
+    header = f"{'Model':<6} " + "  ".join(f"{g:>18}" for g in group_order) + f"  {'Gap':>14}"
+    print(header)
+    print("-" * len(header))
+    for name, r in all_results.items():
+        cells = []
+        for g in group_order:
+            if g in r[slice_key_mean]:
+                mu = r[slice_key_mean][g] * 100
+                sd = r[slice_key_std][g] * 100
+                cells.append(f"{mu:5.2f}% +/-{sd:4.2f}")
+            else:
+                cells.append("-")
+        gap_key = "gap_age_pp" if "age" in slice_key_mean else "gap_sex_pp"
+        gap = f"{r[gap_key + '_mean']:5.2f}pp +/-{r[gap_key + '_std']:4.2f}"
+        print(f"{name:<6} " + "  ".join(f"{c:>18}" for c in cells) + f"  {gap:>14}")
+
+
+_print_slice_table("PER-AGE-GROUP ACCURACY", "per_age_acc_mean", "per_age_acc_std", AGE_ORDER)
+_print_slice_table("PER-SEX ACCURACY", "per_sex_acc_mean", "per_sex_acc_std", SEX_ORDER)
+
+# ----------------------------------------------------------------------------
+# RF feature importance: one vector per seed + mean.  Fig. 12 top-15 chart
+# and the DANN "top-15 features only" ablation both read from here.
+# ----------------------------------------------------------------------------
+if rf_fi_per_seed:
+    fi_stack = np.array(rf_fi_per_seed, dtype=float)
+    all_results["RF"]["feature_importances_per_seed"] = rf_fi_per_seed
+    all_results["RF"]["feature_importances_mean"] = fi_stack.mean(axis=0).tolist()
+    all_results["RF"]["feature_importances_std"] = fi_stack.std(axis=0).tolist()
+
+# Feature name index — sits at the top level so make_figures.py and the
+# ablation script don't have to re-parse the CSV to label bars.
+all_results["_feature_names"] = FEATURE_NAMES
 
 # ----------------------------------------------------------------------------
 # Save results
