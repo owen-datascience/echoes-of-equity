@@ -1,0 +1,20 @@
+# Echoes of Equity - Analysis scripts
+# Paper (Section IV-A) states Python 3.11 / scikit-learn 1.4 / TensorFlow 2.20.
+# These pins work on Python 3.11, 3.12, and 3.13. Windows wheels only exist
+# for numpy 2.1+ and scikit-learn 1.6+ on cp313, so the upper bounds below
+# are loose enough for pip to always find a prebuilt wheel (no C++ compile).
+#
+# Install with:  pip install -r requirements.txt
+#
+# Script -> package usage:
+#   compare_all_models.py  : numpy, pandas, tensorflow, scikit-learn
+#   run_dann_ablation.py   : numpy, pandas, tensorflow, scikit-learn
+#   make_figures.py        : numpy, pandas, matplotlib, seaborn
+#   make_arch_figures.py   : matplotlib
+
+numpy>=1.26,<3
+pandas>=2.1,<3
+scikit-learn>=1.4,<2
+tensorflow>=2.20,<2.21
+matplotlib>=3.8,<4
+seaborn>=0.13,<1

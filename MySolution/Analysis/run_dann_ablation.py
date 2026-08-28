@@ -30,7 +30,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-SEEDS = [42, 43, 44, 45, 46]
+# 50 seeds to match compare_all_models.py so Table 8 rows are directly
+# comparable to Table 3 rows.  Set back to list(range(42, 67)) or
+# list(range(42, 47)) for smaller runs.
+SEEDS = list(range(42, 92))
 SPLIT_SEED = 42
 EPOCHS = 80
 LAM_MAX = 1.0
@@ -286,14 +289,37 @@ VARIANTS = [
 ]
 
 ablation = {}
+# Resume support: if a prior run finished some variants (with the SAME SEEDS
+# list), keep them and skip. Delete ablation_results.json to force a full
+# rerun. A stale cache with a different seed count is detected and rejected.
+if os.path.exists(OUT_JSON):
+    try:
+        with open(OUT_JSON) as f:
+            prior = json.load(f)
+        # Only reuse entries whose recorded seed list matches ours exactly.
+        for k, v in prior.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, dict) and v.get("seeds") == SEEDS:
+                ablation[k] = v
+        if ablation:
+            print(f"Loaded {len(ablation)} previously completed variants "
+                  f"(matching {len(SEEDS)}-seed run); will skip.")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[warn] could not read {OUT_JSON} ({e}); starting fresh.")
+
 for name, fn in VARIANTS:
+    if name in ablation:
+        print(f"[skip] {name}: already in {OUT_JSON}")
+        continue
     print(f"\n=== {name}: running {len(SEEDS)} seeds ===", flush=True)
     per_seed = []
     for s in SEEDS:
         probs = fn(s)
         r = _eval(probs)
         per_seed.append(r)
-        print(f"  seed={s}  acc={r['acc']*100:5.2f}%  auc={r['auc']:.3f}  gap={r['gap_pp']:5.2f}pp")
+        print(f"  seed={s}  acc={r['acc']*100:5.2f}%  auc={r['auc']:.3f}  gap={r['gap_pp']:5.2f}pp",
+              flush=True)
     accs = [r["acc"] for r in per_seed]
     aucs = [r["auc"] for r in per_seed]
     gaps = [r["gap_pp"] for r in per_seed]
@@ -304,9 +330,12 @@ for name, fn in VARIANTS:
         "gap_pp_mean": float(np.mean(gaps)), "gap_pp_std": float(np.std(gaps)),
         "raw_per_seed": per_seed,
     }
-
-ablation["_top15_feature_indices"] = [int(i) for i in top_idx]
-ablation["_top15_feature_names"] = top_names
+    # Persist after every variant so a crash/interrupt doesn't lose progress.
+    ablation["_top15_feature_indices"] = [int(i) for i in top_idx]
+    ablation["_top15_feature_names"] = top_names
+    with open(OUT_JSON, "w") as f:
+        json.dump(ablation, f, indent=2)
+    print(f"[saved] {OUT_JSON}")
 
 # ----------------------------------------------------------------------------
 # Table 8 (mean +/- std) to stdout.
@@ -326,6 +355,73 @@ for name, r in ablation.items():
         f"{r['gap_pp_mean']:>8.2f}pp +/-{r['gap_pp_std']:4.2f}"
     )
 
-with open(OUT_JSON, "w") as f:
-    json.dump(ablation, f, indent=2)
+# ----------------------------------------------------------------------------
+# Levene's test: is dann_full's fairness-gap VARIANCE actually different from
+# each ablation variant? p<0.05 => yes.  scipy ships as a scikit-learn dep,
+# so it's already available.
+# ----------------------------------------------------------------------------
+try:
+    from scipy import stats
+except ImportError:
+    print("\n[warn] scipy not installed; skipping Levene's test.")
+else:
+    def _gaps(name):
+        return [r["gap_pp"] for r in ablation[name]["raw_per_seed"]]
+
+    pairs = [
+        ("dann_full", "dann_no_grl"),
+        ("dann_full", "dann_no_domain"),
+        ("dann_full", "dann_no_bn"),
+        ("dann_full", "dann_top15"),
+    ]
+
+    # ----------------------------------------------------------------------
+    # Mann-Whitney U on GAP MEAN and ACCURACY MEAN.  The ablation's most
+    # important finding (dann_no_bn dominates dann_full on both metrics)
+    # only becomes a paper-defensible claim once MEANS are statistically
+    # tested; Levene's below only covers VARIANCE of the fairness gap.
+    # ----------------------------------------------------------------------
+    def _accs(name):
+        return [r["acc"] for r in ablation[name]["raw_per_seed"]]
+
+    print("\n" + "=" * 72)
+    print(f"GAP MEAN comparison (Mann-Whitney U, N={len(SEEDS)})")
+    print("=" * 72)
+    print(f"{'Comparison':<32} {'gap_a':>7} {'gap_b':>7} {'U':>8} {'p':>8}   verdict")
+    print("-" * 72)
+    for a, b in pairs:
+        if a not in ablation or b not in ablation:
+            continue
+        ga, gb = _gaps(a), _gaps(b)
+        mu_a, mu_b = float(np.mean(ga)), float(np.mean(gb))
+        u, p = stats.mannwhitneyu(ga, gb, alternative="two-sided")
+        tag = "SIGNIFICANT (p<0.05)" if p < 0.05 else "not significant"
+        print(f"{a} vs {b:<20} {mu_a:>7.2f} {mu_b:>7.2f} {u:>8.1f} {p:>8.4f}   {tag}")
+
+    print("\n" + "=" * 72)
+    print(f"ACCURACY MEAN comparison (Mann-Whitney U, N={len(SEEDS)})")
+    print("=" * 72)
+    print(f"{'Comparison':<32} {'acc_a%':>7} {'acc_b%':>7} {'U':>8} {'p':>8}   verdict")
+    print("-" * 72)
+    for a, b in pairs:
+        if a not in ablation or b not in ablation:
+            continue
+        aa, ab = _accs(a), _accs(b)
+        mu_a, mu_b = float(np.mean(aa)) * 100, float(np.mean(ab)) * 100
+        u, p = stats.mannwhitneyu(aa, ab, alternative="two-sided")
+        tag = "SIGNIFICANT (p<0.05)" if p < 0.05 else "not significant"
+        print(f"{a} vs {b:<20} {mu_a:>7.2f} {mu_b:>7.2f} {u:>8.1f} {p:>8.4f}   {tag}")
+
+    print("\n" + "=" * 72)
+    print(f"GAP VARIANCE comparison (Levene's test, N={len(SEEDS)})")
+    print("=" * 72)
+    print(f"{'Comparison':<40} {'W':>7} {'p-value':>10}   {'verdict'}")
+    print("-" * 72)
+    for a, b in pairs:
+        if a not in ablation or b not in ablation:
+            continue
+        stat, p = stats.levene(_gaps(a), _gaps(b), center="median")
+        tag = "SIGNIFICANT (p<0.05)" if p < 0.05 else "not significant"
+        print(f"{a} vs {b:<22} {stat:>7.2f} {p:>10.4f}   {tag}")
+
 print(f"\nSaved ablation results to {OUT_JSON}")

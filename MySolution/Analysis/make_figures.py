@@ -1,14 +1,21 @@
 
 # Echoes of Equity: paper-figure generator.
 #
-# Produces the data-driven figures referenced in the paper plan:
-#   Fig 2:  Speaker demographics by ethnicity x age x sex
-#   Fig 3:  Acoustic feature boxplots (Neutral vs Trustworthy)
-#   Fig 9:  Per-ethnicity accuracy with error bars (the HEADLINE fairness figure)
-#   Fig 13: Fairness-accuracy Pareto scatter with error bars
+# Filenames keep their original numbering for backward compatibility with
+# update_figures.py, but the on-image titles are aligned to the paper's
+# current figure numbers (as of the 50-seed rebuild):
 #
-# Hand-drawn figures (Fig 1 pipeline, Fig 4 ANN arch, Fig 5 CNN arch,
-# Fig 6 DANN arch) live in drawio/TikZ outside this script.
+#   fig03_feature_boxplots.png  -> Paper Fig. 1
+#   fig09_acc_by_ethnicity.png  -> Paper Fig. 6
+#   fig13_fairness_pareto.png   -> Paper Fig. 7
+#   fig10_acc_by_age_sex.png    -> Paper Fig. 8
+#
+#   fig02_demographics.png      -> NOT in paper (demographics shown in Table 1)
+#   fig11_confusion_matrices.png -> NOT in paper (candidate future Fig. 9)
+#   fig12_feature_importance.png -> NOT in paper (candidate future appendix)
+#
+# Architecture / pipeline diagrams (Paper Fig. 2 pipeline, Fig. 3 ANN,
+# Fig. 4 CNN, Fig. 5 DANN) are produced by make_arch_figures.py, not here.
 
 import os
 import json
@@ -84,8 +91,10 @@ def make_fig02_demographics():
         ax.spines["right"].set_visible(False)
 
     axes[0].legend(title="Sex", loc="upper right")
-    fig.suptitle("Fig. 2  Speaker demographics in the TIS Corpus.  "
-                 "Red labels mark cells with N <= 10.",
+    # Not currently placed in the paper (demographics shown as Table 1).
+    fig.suptitle("Speaker demographics in the TIS Corpus.  "
+                 "Red labels mark cells with N <= 10.  "
+                 "(Reference figure; not currently in the paper.)",
                  y=1.02, fontsize=11)
     out = os.path.join(FIG_DIR, "fig02_demographics.png")
     fig.savefig(out)
@@ -130,7 +139,7 @@ def make_fig03_feature_boxplots():
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    fig.suptitle("Fig. 3  Six acoustic features that drive trustworthy-intent classification, "
+    fig.suptitle("Six acoustic features that drive trustworthy-intent classification, "
                  "Neutral vs Trustworthy speech.", y=1.01)
     fig.tight_layout()
     out = os.path.join(FIG_DIR, "fig03_feature_boxplots.png")
@@ -140,7 +149,8 @@ def make_fig03_feature_boxplots():
 
 
 # ---------------------------------------------------------------------------
-# Fig 9: per-ethnicity accuracy bar chart with error bars (headline fairness)
+# Paper Fig. 6: per-ethnicity accuracy bar chart with error bars
+# (filename kept as fig09_acc_by_ethnicity.png for backward compat)
 # ---------------------------------------------------------------------------
 def make_fig09_acc_by_ethnicity(results):
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -166,8 +176,9 @@ def make_fig09_acc_by_ethnicity(results):
     ax.set_xticklabels(ETH_ORDER_PRETTY)
     ax.set_ylabel("Accuracy (%)")
     ax.set_ylim(55, 90)
-    ax.set_title("Fig. 9  Per-ethnicity trust accuracy, mean +/- std over 5 seeds.\n"
-                 "Deep models (ANN/CNN/DANN) raise South Asian accuracy by ~8pp.",
+    ax.set_title("Per-ethnicity trust accuracy, mean +/- std over 50 seeds.\n"
+                 "Deep models (ANN/CNN/DANN) raise South Asian accuracy by ~8-10 pp "
+                 "over Random Forest, largely closing the baseline gap.",
                  fontsize=11)
     ax.legend(loc="upper right", ncol=5, frameon=False, fontsize=9)
     ax.spines["top"].set_visible(False)
@@ -180,7 +191,8 @@ def make_fig09_acc_by_ethnicity(results):
 
 
 # ---------------------------------------------------------------------------
-# Fig 13: fairness-accuracy Pareto scatter
+# Paper Fig. 7: fairness-accuracy Pareto scatter
+# (filename kept as fig13_fairness_pareto.png for backward compat)
 # ---------------------------------------------------------------------------
 def make_fig13_pareto(results):
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
@@ -211,8 +223,9 @@ def make_fig13_pareto(results):
 
     ax.set_xlabel("Overall accuracy (%)")
     ax.set_ylabel("Fairness gap: max - min ethnicity accuracy (pp)")
-    ax.set_title("Fig. 13  Fairness vs accuracy trade-off (mean +/- std over 5 seeds).\n"
-                 "DANN-Trust sits in the lower-right corner with the smallest error bars.",
+    ax.set_title("Fairness vs accuracy trade-off (mean +/- std over 50 seeds).\n"
+                 "CNN and DANN-Trust occupy essentially the same region of the plane; "
+                 "their error bars overlap on both axes.",
                  fontsize=11)
     ax.legend(loc="upper right", frameon=True, fontsize=9)
     ax.grid(True, alpha=0.25)
@@ -228,7 +241,8 @@ def make_fig13_pareto(results):
 
 
 # ---------------------------------------------------------------------------
-# Fig 10: per-age-group and per-sex accuracy bar charts (paired axes)
+# Paper Fig. 8: per-age-group and per-sex accuracy bar charts (paired axes)
+# (filename kept as fig10_acc_by_age_sex.png for backward compat)
 # ---------------------------------------------------------------------------
 AGE_ORDER = ["Younger", "Older"]
 SEX_ORDER = ["Female", "Male"]
@@ -264,8 +278,8 @@ def make_fig10_acc_by_age_sex(results):
                  "per_sex_acc_mean", "per_sex_acc_std",
                  "Per-sex accuracy", (55, 90))
     axes[1].legend(loc="upper right", ncol=5, frameon=False, fontsize=9)
-    fig.suptitle("Fig. 10  Per-age-group and per-sex trust accuracy "
-                 "(mean +/- std over 5 seeds).",
+    fig.suptitle("Per-age-group and per-sex trust accuracy "
+                 "(mean +/- std over 50 seeds).",
                  y=1.02, fontsize=11)
     fig.tight_layout()
     out = os.path.join(FIG_DIR, "fig10_acc_by_age_sex.png")
@@ -298,8 +312,9 @@ def make_fig11_confusion_matrices(results):
             ax.set_ylabel("True")
         else:
             ax.set_ylabel("")
-    fig.suptitle("Fig. 11  Confusion matrices on the held-out test set, "
-                 "averaged over 5 seeds.  Rows: true label; columns: prediction.",
+    # Not currently placed in the paper (candidate future figure).
+    fig.suptitle("Confusion matrices on the held-out test set, "
+                 "averaged over 50 seeds.  Rows: true label; columns: prediction.",
                  y=1.05, fontsize=11)
     fig.tight_layout()
     out = os.path.join(FIG_DIR, "fig11_confusion_matrices.png")
@@ -341,10 +356,12 @@ def make_fig12_feature_importance(results):
     ax.set_yticks(y)
     ax.set_yticklabels(top_names)
     ax.invert_yaxis()
-    ax.set_xlabel("Random Forest Gini importance (mean +/- std over 5 seeds)")
-    ax.set_title("Fig. 12  Top-15 acoustic features driving RF trust "
-                 "classification.\nF0, HNR and shimmer/CPP dominate; "
-                 "LTAS features rank low.", fontsize=11)
+    ax.set_xlabel("Random Forest Gini importance (mean +/- std over 50 seeds)")
+    # Not currently placed in the paper; if inserted, would be an appendix figure.
+    ax.set_title("Top-15 acoustic features driving RF trust classification.\n"
+                 "F0, HNR and shimmer/CPP dominate; LTAS features rank low.  "
+                 "(Candidate appendix figure; not currently in the paper.)",
+                 fontsize=11)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", alpha=0.25)
