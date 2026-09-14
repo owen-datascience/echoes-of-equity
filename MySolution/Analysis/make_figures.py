@@ -71,7 +71,7 @@ def make_fig2_feature_boxplots():
     fig.suptitle("Six acoustic features that drive trustworthy-intent classification, "
                  "Neutral vs Trustworthy speech.", y=1.01)
     fig.tight_layout()
-    out = os.path.join(FIG_DIR, "fig03_feature_boxplots.png")
+    out = os.path.join(FIG_DIR, "fig2_feature_boxplots.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
@@ -108,7 +108,7 @@ def make_fig6_acc_by_ethnicity(results):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    out = os.path.join(FIG_DIR, "fig09_acc_by_ethnicity.png")
+    out = os.path.join(FIG_DIR, "fig6_acc_by_ethnicity.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
@@ -152,7 +152,7 @@ def make_fig7_pareto(results):
     ax.set_xlim(70, 81)
     ax.set_ylim(0, 18)
 
-    out = os.path.join(FIG_DIR, "fig13_fairness_pareto.png")
+    out = os.path.join(FIG_DIR, "fig7_fairness_pareto.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
