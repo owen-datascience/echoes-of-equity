@@ -1,16 +1,3 @@
-
-# Echoes of Equity: architecture-diagram generator.
-#
-# Produces the four architecture / pipeline figures referenced in the paper:
-#   Fig 1:  Overall pipeline (banner for Section I)
-#   Fig 4:  ANN architecture (Section IV-C)
-#   Fig 5:  1D-CNN architecture (Section IV-D)
-#   Fig 6:  DANN-Trust architecture (Section IV-E, hero figure)
-#
-# Output: PNGs in Paper/figures/.  Style is matplotlib-native (boxes + arrows
-# + labels), publication-acceptable but not as polished as drawio / TikZ.
-# If you want higher polish, the specs in Paper/figures_to_draw.md still apply.
-
 import os
 import matplotlib
 matplotlib.use("Agg")
@@ -30,7 +17,6 @@ plt.rcParams.update({
     "font.family": "sans-serif",
 })
 
-# Palette matching the data-driven figures' seaborn 'colorblind' palette.
 C_BLUE        = "#4c72b0"
 C_ORANGE      = "#dd8452"
 C_GREEN       = "#55a467"
@@ -76,9 +62,6 @@ def setup(ax, xlim, ylim, title=None):
         ax.set_title(title, fontsize=12, fontweight="bold", pad=10, loc="left")
 
 
-# ---------------------------------------------------------------------------
-# Fig 1: Overall pipeline
-# ---------------------------------------------------------------------------
 def make_fig01_pipeline():
     fig, ax = plt.subplots(figsize=(14, 5.5))
     setup(ax, (0, 14), (0, 6), "Fig. 1  Pipeline of the Echoes of Equity study")
@@ -141,7 +124,7 @@ def make_fig01_pipeline():
     ax.text(5.95, 2.2, "921 train  |  231 test",
             ha="center", fontsize=8, color=C_DARK)
 
-    out = os.path.join(FIG_DIR, "fig01_pipeline.png")
+    out = os.path.join(FIG_DIR, "fig1_pipeline.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
@@ -176,10 +159,7 @@ def draw_stack(ax, blocks, *, y_centre=2.5, gap=0.4, height=1.6,
     return centres, x
 
 
-# ---------------------------------------------------------------------------
-# Fig 4: ANN architecture
-# ---------------------------------------------------------------------------
-def make_fig04_ann_arch():
+def make_fig3_ann_arch():
     fig, ax = plt.subplots(figsize=(12, 4.5))
 
     blocks = [
@@ -205,23 +185,20 @@ def make_fig04_ann_arch():
     ax.set_ylim(0, 5)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title("Fig. 4  Architecture of the ANN trust classifier",
+    ax.set_title("Fig. 3  Architecture of the ANN trust classifier",
                  fontsize=12, fontweight="bold", pad=10, loc="left")
 
     ax.text(x_end / 2, 0.4,
             "Total: 18.2k parameters  *  Adam lr=1e-3  *  batch=32  *  50 epochs  *  BCE loss",
             ha="center", fontsize=9, color=C_DARK, style="italic")
 
-    out = os.path.join(FIG_DIR, "fig04_ann_arch.png")
+    out = os.path.join(FIG_DIR, "fig3_ann_arch.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
 
 
-# ---------------------------------------------------------------------------
-# Fig 5: 1D-CNN architecture
-# ---------------------------------------------------------------------------
-def make_fig05_cnn_arch():
+def make_fig4_cnn_arch():
     fig, ax = plt.subplots(figsize=(13, 4.5))
 
     blocks = [
@@ -248,26 +225,23 @@ def make_fig05_cnn_arch():
     ax.set_ylim(0, 5)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title("Fig. 5  Architecture of the 1D-CNN trust classifier",
+    ax.set_title("Fig. 4  Architecture of the 1D-CNN trust classifier",
                  fontsize=12, fontweight="bold", pad=10, loc="left")
 
     ax.text(x_end / 2, 0.4,
             "Total: ~119k parameters  *  Adam lr=1e-3  *  batch=32  *  50 epochs  *  BCE loss",
             ha="center", fontsize=9, color=C_DARK, style="italic")
 
-    out = os.path.join(FIG_DIR, "fig05_cnn_arch.png")
+    out = os.path.join(FIG_DIR, "fig4_cnn_arch.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
 
 
-# ---------------------------------------------------------------------------
-# Fig 6: DANN-Trust architecture (HERO)
-# ---------------------------------------------------------------------------
-def make_fig06_dann_arch():
+
+def make_fig5_dann_arch():
     fig, ax = plt.subplots(figsize=(14.5, 8.0))
 
-    # ENCODER (horizontal, centre row)
     enc_y = 4.0
     add_box(ax, 0.4, enc_y - 0.7, 1.5, 1.4, "x in R^60\n60 features",
             fc=C_LIGHT_BLUE, ec=C_BLUE, lw=1.5, fontweight="bold")
@@ -289,7 +263,6 @@ def make_fig06_dann_arch():
     ax.text(3.5, enc_y - 1.55, "Encoder  G_f  (shared, blue)",
             ha="center", fontsize=10, fontweight="bold", color=C_BLUE, style="italic")
 
-    # TRUST HEAD (top branch)
     th_y = 6.0
     add_box(ax, 8.7, th_y - 0.55, 1.7, 1.1, "Dense 16\nReLU + Drop",
             fc=C_LIGHT_GREEN, ec=C_GREEN, lw=1.5)
@@ -305,7 +278,6 @@ def make_fig06_dann_arch():
     ax.text(11.0, th_y - 1.05, "L_trust(y_hat, y) = binary cross-entropy",
             ha="center", fontsize=8, color=C_DARK, style="italic")
 
-    # DOMAIN HEAD (bottom branch) with GRL
     dh_y = 2.0
     add_box(ax, 8.4, dh_y - 0.6, 2.0, 1.2, "GRL\nfwd: identity\nbwd: x(-lambda)",
             fc=C_LIGHT_RED, ec=C_RED, lw=2.4, fontweight="bold")
@@ -336,10 +308,10 @@ def make_fig06_dann_arch():
     ax.set_ylim(0, 8.2)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title("Fig. 6  DANN-Trust architecture: shared encoder + trust head + GRL-protected domain head",
+    ax.set_title("Fig. 5  DANN-Trust architecture: shared encoder + trust head + GRL-protected domain head",
                  fontsize=12, fontweight="bold", pad=10, loc="left")
 
-    out = os.path.join(FIG_DIR, "fig06_dann_arch.png")
+    out = os.path.join(FIG_DIR, "fig5_dann_arch.png")
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
@@ -348,7 +320,7 @@ def make_fig06_dann_arch():
 if __name__ == "__main__":
     print(f"Figure output directory: {FIG_DIR}")
     make_fig01_pipeline()
-    make_fig04_ann_arch()
-    make_fig05_cnn_arch()
-    make_fig06_dann_arch()
+    make_fig3_ann_arch()
+    make_fig4_cnn_arch()
+    make_fig5_dann_arch()
     print("\nAll architecture figures written.")
