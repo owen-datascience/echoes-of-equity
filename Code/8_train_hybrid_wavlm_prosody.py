@@ -16,8 +16,6 @@ from transformers import AutoProcessor, AutoModel
 from transformers import Wav2Vec2FeatureExtractor
 
 
-# ============= CONFIG =============
-# Get the directory where the script is actually sitting
 current_dir = os.path.dirname(os.path.abspath(__file__))
 print(f"Current Working Directory: {current_dir}")
 
@@ -43,7 +41,6 @@ ACOUSTIC_FEATURE_COLS = [
 ]
 
 
-# ============= UTILS =============
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -101,7 +98,6 @@ def make_speaker_splits(
     return df
 
 
-# ============= DATASET =============
 
 class HybridTrustDataset(Dataset):
     """
@@ -114,7 +110,7 @@ class HybridTrustDataset(Dataset):
     def __init__(self, df: pd.DataFrame, feat_means: pd.Series, feat_stds: pd.Series):
         self.df = df.reset_index(drop=True)
         self.feat_means = feat_means
-        self.feat_stds = feat_stds.replace(0, 1.0)  # avoid division by zero
+        self.feat_stds = feat_stds.replace(0, 1.0)  
 
     def __len__(self):
         return len(self.df)
@@ -123,14 +119,12 @@ class HybridTrustDataset(Dataset):
         row = self.df.iloc[idx]
         wav_path = row["wav_path"]
 
-        # Load audio, mono, resample
         y, sr = sf.read(wav_path)
         if y.ndim > 1:
             y = np.mean(y, axis=1)
         if sr != TARGET_SR:
             y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR)
 
-        # Acoustic features
         feats = row[ACOUSTIC_FEATURE_COLS].values.astype(np.float32)
         feats_norm = (feats - self.feat_means.values) / (self.feat_stds.values + 1e-9)
 
@@ -158,8 +152,6 @@ def collate_fn(batch: List):
     return audios, feats_tensor, labels_tensor
 
 
-# ============= MODEL =============
-
 class WavLMHybridClassifier(nn.Module):
     """
     Hybrid classifier: [WavLM embedding] + [acoustic features] -> dense layers -> logits
@@ -183,16 +175,13 @@ class WavLMHybridClassifier(nn.Module):
         return logits
 
 
-# ============= TRAIN / EVAL =============
-
 def train_one_epoch(model, wavlm_model, processor, loader, optimizer, criterion):
     model.train()
-    wavlm_model.eval()  # keep WavLM frozen
+    wavlm_model.eval() 
     running_loss = 0.0
     all_preds, all_labels = [], []
 
     for audios, feats, labels in loader:
-        # Prepare inputs for WavLM
         inputs = processor(
             audios,
             sampling_rate=TARGET_SR,
@@ -204,8 +193,8 @@ def train_one_epoch(model, wavlm_model, processor, loader, optimizer, criterion)
 
         with torch.no_grad():
             outputs = wavlm_model(input_values=input_values, attention_mask=attention_mask)
-            hidden_states = outputs.last_hidden_state  # [B, T, H]
-            wavlm_embeds = hidden_states.mean(dim=1)   # [B, H] mean-pool over time
+            hidden_states = outputs.last_hidden_state  
+            wavlm_embeds = hidden_states.mean(dim=1)   
 
         feats = feats.to(DEVICE)
         labels = labels.to(DEVICE)
@@ -246,8 +235,8 @@ def eval_model(model, wavlm_model, processor, loader, criterion) -> Tuple[float,
             attention_mask = inputs["attention_mask"].to(DEVICE)
 
             outputs = wavlm_model(input_values=input_values, attention_mask=attention_mask)
-            hidden_states = outputs.last_hidden_state  # [B, T, H]
-            wavlm_embeds = hidden_states.mean(dim=1)   # [B, H]
+            hidden_states = outputs.last_hidden_state 
+            wavlm_embeds = hidden_states.mean(dim=1)   
 
             feats = feats.to(DEVICE)
             labels = labels.to(DEVICE)
@@ -266,7 +255,6 @@ def eval_model(model, wavlm_model, processor, loader, criterion) -> Tuple[float,
     return epoch_loss, epoch_acc, np.array(all_labels), np.array(all_preds)
 
 
-# ============= FAIRNESS ANALYSIS =============
 
 def group_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray, group_col: str):
     """
@@ -285,19 +273,13 @@ def group_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray, grou
         print(f"{group_col} = {group_value:12s} | N = {len(subset):3d} | Accuracy = {acc:.3f}")
 
 
-# ============= MAIN =============
-
 def main():
-    # 1) Load metadata
     df = pd.read_csv(METADATA_CSV)
 
-    # Keep only valid labels
     df = df[df["intent"].isin(["neutral", "trustworthy"])]
 
-    # Ensure acoustic features have no NaNs (drop any remaining problematic rows)
     df = df.dropna(subset=ACOUSTIC_FEATURE_COLS)
 
-    # 2) Make speaker-independent splits
     df = make_speaker_splits(df, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15)
     print("Split distribution:")
     print(df["split"].value_counts())
@@ -306,11 +288,9 @@ def main():
     val_df   = df[df["split"] == "val"].reset_index(drop=True)
     test_df  = df[df["split"] == "test"].reset_index(drop=True)
 
-    # 3) Compute feature stats on TRAIN ONLY (to avoid leakage)
     feat_means = train_df[ACOUSTIC_FEATURE_COLS].mean()
     feat_stds  = train_df[ACOUSTIC_FEATURE_COLS].std().replace(0, 1.0)
 
-    # 4) Create datasets and loaders
     train_dataset = HybridTrustDataset(train_df, feat_means, feat_stds)
     val_dataset   = HybridTrustDataset(val_df, feat_means, feat_stds)
     test_dataset  = HybridTrustDataset(test_df, feat_means, feat_stds)
@@ -334,9 +314,7 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # 5) Load WavLM model + processor
     print("Loading WavLM model...")
-    # WavLM uses feature extractor, not tokenizer - use Wav2Vec2FeatureExtractor
     try:
         processor = Wav2Vec2FeatureExtractor.from_pretrained(MODEL_NAME)
         print("Loaded Wav2Vec2FeatureExtractor successfully.")
@@ -346,7 +324,6 @@ def main():
         processor = AutoProcessor.from_pretrained(MODEL_NAME)
     wavlm_model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE)
 
-    # Freeze WavLM parameters
     for p in wavlm_model.parameters():
         p.requires_grad = False
 
@@ -362,7 +339,6 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(classifier.parameters(), lr=LR)
 
-    # 6) Train
     best_val_acc = 0.0
     best_state = None
 
@@ -387,7 +363,6 @@ def main():
     if best_state is not None:
         classifier.load_state_dict(best_state)
 
-    # 7) Final test evaluation
     test_loss, test_acc, y_true, y_pred = eval_model(
         classifier, wavlm_model, processor, test_loader, criterion
     )
@@ -396,7 +371,6 @@ def main():
     print("\nClassification report (0=neutral, 1=trustworthy):")
     print(classification_report(y_true, y_pred, target_names=["neutral", "trustworthy"]))
 
-    # 8) Fairness / group-wise performance
     for group_col in ["ethnicity", "age_group", "sex"]:
         group_metrics(test_df, y_true, y_pred, group_col)
 
