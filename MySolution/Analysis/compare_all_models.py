@@ -1,21 +1,3 @@
-
-# Echoes of Equity: multi-seed head-to-head comparison of all 5 models on the
-# IDENTICAL joint-stratified 80/20 split.  The data split is fixed
-# (seed=42 controls the train/test partition).  Only the MODEL initialization
-# seed varies across reruns.  This isolates "model variance" from "split luck".
-#
-# Models compared:
-#   * RF    (sklearn RandomForestClassifier)
-#   * LR    (sklearn LogisticRegression)
-#   * ANN   (Keras 3-layer dense network with BN + dropout)
-#   * CNN   (Keras 1D-conv with two Conv1D layers)
-#   * DANN  (Keras adversarial model: shared encoder + trust head + GRL-protected ethnicity head)
-#
-# Output:
-#   * Pretty-printed mean +/- std tables on stdout.
-#   * results.json: per-seed lists AND aggregated mean/std for every metric,
-#     for direct consumption by the paper's table macros and figures.
-
 import os
 import json
 import numpy as np
@@ -31,16 +13,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 
-# 50 seeds so the sex-gap MEAN comparison (Mann-Whitney U vs baselines) has
-# enough power to cross p<0.05 -- 25 seeds landed at p~0.07 for RF vs CNN
-# and RF vs DANN.  Doubling gets us over that threshold if the effect is real.
-# Set back to list(range(42, 67)) or list(range(42, 47)) for smaller runs.
-SEEDS = list(range(42, 92))
-SPLIT_SEED = 42       # fixed; identical train/test for every model and every run.
 
-# ----------------------------------------------------------------------------
-# Gradient Reversal Layer (DANN building block)
-# ----------------------------------------------------------------------------
+SEEDS = list(range(42, 92))
+SPLIT_SEED = 42      
+
 @tf.custom_gradient
 def _grl_op(x, lam):
     def grad(dy):
@@ -72,10 +48,6 @@ class LambdaScheduler(tf.keras.callbacks.Callback):
         self.grl.set_lambda(self.lam_max * (2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0))
 
 
-# ----------------------------------------------------------------------------
-# Shared data loading + joint stratified split.  EVERY model below uses the
-# IDENTICAL X_tr_s / X_te_s / y_*_tr / y_*_te arrays so comparisons are valid.
-# ----------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.normpath(os.path.join(
     SCRIPT_DIR, "..", "NewMethods", "DANN_Trustworthy_Intent_Project",
@@ -104,7 +76,6 @@ ethn_str = df["Speaker_Ethnicity"].values
 age_str = df["Speaker_AgeGroup"].values
 sex_str = df["Speaker_Sex"].values
 
-# Joint stratification: 2 intents * 3 ethnicities = 6 cells, balanced across split.
 strata = (y_trust.astype(int) * 10 + y_ethn).astype(int)
 (X_tr, X_te, yt_tr, yt_te, ye_tr, ye_te,
  es_tr, es_te, ag_tr, ag_te, sx_tr, sx_te) = train_test_split(
@@ -126,20 +97,10 @@ for e in ethn_enc.classes_:
     n_tru = int(((es_te == e) & (yt_te == 1)).sum())
     print(f"  {e:<12}  Neutral={n_neu:>3}   Trustworthy={n_tru:>3}")
 
-
-# ----------------------------------------------------------------------------
-# Per-model trainers.  Each accepts a SEED and returns (probs, preds) on the
-# fixed held-out test set.  We seed numpy + tf BEFORE building the model so
-# weight initialization (and any internal randomness) is controlled.
-# ----------------------------------------------------------------------------
 def _seed_all(seed):
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
-
-# RF feature-importance vectors (one per seed), captured as a side-effect so
-# every runner keeps the uniform (probs, preds) return contract.  Fig. 12
-# and the DANN "top-15 features only" ablation read from here.
 rf_fi_per_seed = []
 
 
@@ -193,11 +154,6 @@ def run_cnn(seed):
 
 
 def run_dann(seed, epochs=80, lam_max=1.0):
-    # NOTE: BatchNormalization intentionally omitted from the encoder.
-    # The 50-seed ablation (Section VI.G) shows that dann_no_bn significantly
-    # outperforms dann_full on accuracy (p=0.002), gap mean (p=0.011), and gap
-    # variance (p=0.049).  This is the "DANN-Trust" architecture reported in
-    # the paper.  See run_dann_ablation.py for the with-BN comparison.
     _seed_all(seed)
     inp = Input(shape=(INPUT_DIM,), name="acoustic_features")
     h = Dense(128, activation="relu")(inp)
@@ -229,10 +185,6 @@ def run_dann(seed, epochs=80, lam_max=1.0):
     p = m.predict(X_te_s, verbose=0)[0].ravel()
     return p, (p >= 0.5).astype(np.int32)
 
-
-# ----------------------------------------------------------------------------
-# Run each model on every seed; collect per-seed metrics.
-# ----------------------------------------------------------------------------
 MODELS = [
     ("RF", run_rf),
     ("LR", run_lr),
@@ -291,20 +243,16 @@ def _eval_one(probs, preds):
 all_results = {}
 OUT_PATH = os.path.join(SCRIPT_DIR, "results.json")
 
-# Resume support: if a prior run finished some models (with the SAME SEEDS
-# list), keep them and skip. Delete results.json to force a full rerun.
-# A stale cache with a different seed count is detected and rejected.
 if os.path.exists(OUT_PATH):
     try:
         with open(OUT_PATH) as f:
             prior = json.load(f)
         for k, v in prior.items():
             if k.startswith("_"):
-                all_results[k] = v            # keep _feature_names etc.
+                all_results[k] = v           
                 continue
             if isinstance(v, dict) and v.get("seeds") == SEEDS:
                 all_results[k] = v
-                # Restore rf_fi_per_seed side-effect so ablation top-15 still works.
                 if k == "RF" and "feature_importances_per_seed" in v:
                     rf_fi_per_seed[:] = v["feature_importances_per_seed"]
         cached = [k for k in all_results if not k.startswith("_")]
@@ -328,7 +276,6 @@ for name, fn in MODELS:
         print(f"  seed={s}  acc={r['overall_acc']*100:5.2f}%  auc={r['overall_auc']:.3f}  gap={r['gap_pp']:5.2f}pp",
               flush=True)
 
-    # Aggregate
     overall_accs = [r["overall_acc"] for r in per_seed]
     overall_aucs = [r["overall_auc"] for r in per_seed]
     gaps = [r["gap_pp"] for r in per_seed]
@@ -350,8 +297,6 @@ for name, fn in MODELS:
     eth_acc_mu, eth_acc_sd, eth_auc_mu, eth_auc_sd = _slice_agg("per_eth", ethn_enc.classes_)
     age_acc_mu, age_acc_sd, age_auc_mu, age_auc_sd = _slice_agg("per_age", AGE_ORDER)
     sex_acc_mu, sex_acc_sd, sex_auc_mu, sex_auc_sd = _slice_agg("per_sex", SEX_ORDER)
-
-    # Mean confusion matrix over seeds, elementwise (stored as list-of-lists).
     cm_stack = np.array([r["confusion_matrix"] for r in per_seed], dtype=float)
     cm_mean = cm_stack.mean(axis=0).tolist()
 
@@ -378,8 +323,6 @@ for name, fn in MODELS:
         "raw_per_seed": per_seed,
     }
 
-    # Persist after every model so a crash/interrupt doesn't lose progress.
-    # Feature-importance side-effects are attached below; write them too.
     if name == "RF" and rf_fi_per_seed:
         fi_stack_now = np.array(rf_fi_per_seed, dtype=float)
         all_results[name]["feature_importances_per_seed"] = rf_fi_per_seed
@@ -390,17 +333,13 @@ for name, fn in MODELS:
         json.dump(all_results, f, indent=2)
     print(f"[saved] {OUT_PATH}")
 
-
-# ----------------------------------------------------------------------------
-# Print tables (mean +/- std across seeds)
-# ----------------------------------------------------------------------------
 print("\n" + "=" * 96)
 print(f"OVERALL PERFORMANCE  (mean +/- std over {len(SEEDS)} seeds; split seed=42)")
 print("=" * 96)
 print(f"{'Model':<6} {'Accuracy':>16} {'AUC':>14} {'Gap':>14}")
 print("-" * 96)
 for name, r in all_results.items():
-    if name.startswith("_"):           # skip metadata keys like _feature_names
+    if name.startswith("_"):         
         continue
     print(
         f"{name:<6} "
@@ -416,7 +355,7 @@ header = f"{'Model':<6} " + "  ".join(f"{e:>18}" for e in ETH_ORDER)
 print(header)
 print("-" * len(header))
 for name, r in all_results.items():
-    if name.startswith("_"):           # skip metadata keys like _feature_names
+    if name.startswith("_"):           
         continue
     cells = []
     for e in ETH_ORDER:
@@ -439,7 +378,7 @@ def _print_slice_table(title, slice_key_mean, slice_key_std, group_order):
     print(header)
     print("-" * len(header))
     for name, r in all_results.items():
-        if name.startswith("_"):       # skip metadata keys like _feature_names
+        if name.startswith("_"):      
             continue
         cells = []
         for g in group_order:
@@ -457,11 +396,6 @@ def _print_slice_table(title, slice_key_mean, slice_key_std, group_order):
 _print_slice_table("PER-AGE-GROUP ACCURACY", "per_age_acc_mean", "per_age_acc_std", AGE_ORDER)
 _print_slice_table("PER-SEX ACCURACY", "per_sex_acc_mean", "per_sex_acc_std", SEX_ORDER)
 
-# ----------------------------------------------------------------------------
-# RF feature importance + feature-name index.  Kept for the case where RF
-# was loaded from cache (the per-model save above only fires when RF is
-# actually retrained this run).
-# ----------------------------------------------------------------------------
 if rf_fi_per_seed and "feature_importances_mean" not in all_results.get("RF", {}):
     fi_stack = np.array(rf_fi_per_seed, dtype=float)
     all_results["RF"]["feature_importances_per_seed"] = rf_fi_per_seed
@@ -469,16 +403,10 @@ if rf_fi_per_seed and "feature_importances_mean" not in all_results.get("RF", {}
     all_results["RF"]["feature_importances_std"] = fi_stack.std(axis=0).tolist()
 all_results.setdefault("_feature_names", FEATURE_NAMES)
 
-# Final save (also written incrementally after each model above).
 with open(OUT_PATH, "w") as f:
     json.dump(all_results, f, indent=2)
 print(f"\nSaved per-seed and aggregated metrics to {OUT_PATH}")
 
-# ----------------------------------------------------------------------------
-# Levene's test on fairness-gap variance.  This is the paper's headline
-# claim: DANN-Trust is more STABLE than the CNN (nearly identical mean
-# gap, much smaller std).  With N=25 seeds the p-value has real teeth.
-# ----------------------------------------------------------------------------
 try:
     from scipy import stats
 except ImportError:
@@ -488,7 +416,7 @@ else:
         return [r["gap_pp"] for r in all_results[name]["raw_per_seed"]]
 
     pairs = [
-        ("CNN", "DANN"),   # headline claim
+        ("CNN", "DANN"),   
         ("ANN", "DANN"),
         ("RF",  "DANN"),
     ]
@@ -504,14 +432,6 @@ else:
         tag = "SIGNIFICANT (p<0.05)" if p < 0.05 else "not significant"
         print(f"{a} vs {b:<12} {stat:>8.2f} {p:>10.4f}   {tag}")
 
-    # ----------------------------------------------------------------------
-    # PER-SEX fairness gap: the dominant disparity in this corpus (~9-10pp
-    # Female > Male across all models). Two questions worth asking:
-    #   1. Do deep models reduce the MEAN sex gap vs baselines?
-    #        -> Mann-Whitney U (rank-based; robust to LR's zero variance)
-    #   2. Do deep models change the VARIANCE of the sex gap vs baselines?
-    #        -> Levene's (LR skipped: zero-variance input is degenerate)
-    # ----------------------------------------------------------------------
     def _sex_gap_series(name):
         return [r["gap_sex_pp"] for r in all_results[name]["raw_per_seed"]]
 
@@ -519,7 +439,7 @@ else:
         ("RF",  "ANN"),
         ("RF",  "CNN"),
         ("RF",  "DANN"),
-        ("CNN", "DANN"),   # do CNN and DANN differ on sex?
+        ("CNN", "DANN"),  
     ]
 
     print("\n" + "=" * 72)
@@ -544,8 +464,7 @@ else:
     for a, b in sex_pairs:
         if a not in all_results or b not in all_results:
             continue
-        # Skip pairs involving zero-variance groups (e.g. LR).  Levene's would
-        # still return a value but interpretation is meaningless.
+     
         sa, sb = _sex_gap_series(a), _sex_gap_series(b)
         sd_a, sd_b = float(np.std(sa)), float(np.std(sb))
         if sd_a == 0.0 or sd_b == 0.0:
@@ -555,16 +474,6 @@ else:
         tag = "SIGNIFICANT (p<0.05)" if p < 0.05 else "not significant"
         print(f"{a} vs {b:<12} {sd_a:>7.2f} {sd_b:>7.2f} {stat:>8.2f} {p:>8.4f}   {tag}")
 
-    # ----------------------------------------------------------------------
-    # PER-AGE fairness gap.  DANN had the smallest mean age gap in the 25-seed
-    # run (3.54pp vs RF 4.93pp and CNN 4.16pp).  Two questions:
-    #   1. Do deep models (esp. DANN) reduce the MEAN age gap vs baselines?
-    #        -> Mann-Whitney U
-    #   2. Is the age-gap VARIANCE different across model classes?
-    #        -> Levene's (LR skipped: zero variance)
-    # If DANN's age advantage is significant, that's a specific axis where
-    # DANN uniquely wins (unlike ethnicity and sex, where CNN and DANN tie).
-    # ----------------------------------------------------------------------
     def _age_gap_series(name):
         return [r["gap_age_pp"] for r in all_results[name]["raw_per_seed"]]
 
@@ -572,7 +481,7 @@ else:
         ("RF",  "ANN"),
         ("RF",  "CNN"),
         ("RF",  "DANN"),
-        ("CNN", "DANN"),   # does DANN specifically beat CNN on age?
+        ("CNN", "DANN"),   
     ]
 
     print("\n" + "=" * 72)
