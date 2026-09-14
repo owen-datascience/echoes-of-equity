@@ -5,15 +5,12 @@ import parselmouth
 from parselmouth.praat import call
 from tqdm import tqdm
 
-# ==== INPUT/OUTPUT PATHS ====
-# Get the directory where the script is actually sitting
 current_dir = os.path.dirname(os.path.abspath(__file__))
 print(f"Current Working Directory: {current_dir}")
 
-METADATA_IN = os.path.join(current_dir, "data/metadata.csv")                        # your existing metadata with wav_path, labels, etc.
-METADATA_OUT = os.path.join(current_dir, "data/metadata_acoustic_prosody.csv")      # new file with extended features
+METADATA_IN = os.path.join(current_dir, "data/metadata.csv")                        
+METADATA_OUT = os.path.join(current_dir, "data/metadata_acoustic_prosody.csv")    
 
-# Pitch range (broad but realistic for adults)
 PITCH_MIN_HZ = 60.0
 PITCH_MAX_HZ = 500.0
 
@@ -30,7 +27,6 @@ def compute_acoustic_prosody_features(wav_path: str):
       - jitter_local
       - cpp_mean_db  (approximate, using harmonicity as CPP-like measure)
     """
-    # Default values in case of errors
     feats = {
         "duration_sec": np.nan,
         "f0_mean_hz": np.nan,
@@ -50,14 +46,12 @@ def compute_acoustic_prosody_features(wav_path: str):
         print(f"[WARN] Error loading {wav_path}: {e}")
         return feats
 
-    # --- duration ---
+
     feats["duration_sec"] = snd.duration
 
-    # --- pitch (F0) using Praat defaults ---
     try:
-        # Let Praat choose time step; we just pass floor & ceiling later when needed
-        pitch = snd.to_pitch()  # default settings
-        f0_values = pitch.selected_array["frequency"]  # Hz
+        pitch = snd.to_pitch() 
+        f0_values = pitch.selected_array["frequency"]  
         f0_voiced = f0_values[f0_values > 0]
 
         if len(f0_voiced) > 0:
@@ -66,18 +60,16 @@ def compute_acoustic_prosody_features(wav_path: str):
     except Exception as e:
         print(f"[WARN] Pitch error in {wav_path}: {e}")
 
-    # --- harmonicity (HNR) & CPP-like feature ---
+
     try:
-        harm = snd.to_harmonicity_cc()  # default time_step & min pitch
-        hnr_mean_db = float(call(harm, "Get mean", 0, 0))  # over whole file
+        harm = snd.to_harmonicity_cc() 
+        hnr_mean_db = float(call(harm, "Get mean", 0, 0)) 
         feats["hnr_mean_db"] = hnr_mean_db
-        feats["cpp_mean_db"] = hnr_mean_db   # simple CPP-like proxy
+        feats["cpp_mean_db"] = hnr_mean_db  
     except Exception as e:
         print(f"[WARN] Harmonicity error in {wav_path}: {e}")
 
-    # --- jitter (local) ---
     try:
-        # Create point process based on pitch range
         point_process = call(
             snd,
             "To PointProcess (periodic, cc)",
@@ -88,15 +80,14 @@ def compute_acoustic_prosody_features(wav_path: str):
         min_period = 1.0 / PITCH_MAX_HZ
         max_period = 1.0 / PITCH_MIN_HZ
 
-        # Jitter (local)
         jitter_local = call(
             point_process,
             "Get jitter (local)",
-            0.0,            # start time
-            0.0,            # end time (0 = whole file)
-            min_period,     # minimum period
-            max_period,     # maximum period
-            1.3,            # maximum period factor
+            0.0,           
+            0.0,           
+            min_period,    
+            max_period,     
+            1.3,          
         )
         feats["jitter_local"] = jitter_local
 
@@ -140,7 +131,6 @@ def main():
     df.to_csv(METADATA_OUT, index=False)
     print(f"Saved extended metadata to {METADATA_OUT}")
 
-    # Simple summary so we can see if things worked
     numeric_cols = [
         "duration_sec",
         "f0_mean_hz",
