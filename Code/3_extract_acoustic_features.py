@@ -6,16 +6,13 @@ import parselmouth
 from parselmouth.praat import call
 from tqdm import tqdm
 
-# Paths
-# Get the directory where the script is actually sitting
 current_dir = os.path.dirname(os.path.abspath(__file__))
 print(f"Current Working Directory: {current_dir}")
 
-METADATA_IN = os.path.join(current_dir, "data/metadata.csv")            # your existing file
-METADATA_OUT = os.path.join(current_dir, "data/metadata_acoustic.csv")    # new file with extra features
+METADATA_IN = os.path.join(current_dir, "data/metadata.csv")         
+METADATA_OUT = os.path.join(current_dir, "data/metadata_acoustic.csv")    
 
-# Pitch settings (Praat-style)
-PITCH_MIN_HZ = 75   # ok for mixed-sex dataset
+PITCH_MIN_HZ = 75   
 PITCH_MAX_HZ = 500
 
 def compute_features(wav_path: str):
@@ -39,13 +36,11 @@ def compute_features(wav_path: str):
             "hnr_mean_db": np.nan,
         }
 
-    # Duration
     duration_sec = snd.duration
 
-    # Pitch (F0)
+
     pitch = snd.to_pitch(time_step=None, pitch_floor=PITCH_MIN_HZ, pitch_ceiling=PITCH_MAX_HZ)
-    f0_values = pitch.selected_array["frequency"]  # Hz
-    # Keep only voiced frames
+    f0_values = pitch.selected_array["frequency"]  
     f0_voiced = f0_values[f0_values > 0]
     if len(f0_voiced) > 0:
         f0_mean = float(np.mean(f0_voiced))
@@ -54,7 +49,6 @@ def compute_features(wav_path: str):
         f0_mean = np.nan
         f0_std = np.nan
 
-    # Harmonics-to-Noise Ratio (HNR)
     try:
         harm = snd.to_harmonicity_cc(time_step=None, minimum_pitch=PITCH_MIN_HZ)
         hnr_mean_db = float(call(harm, "Get mean", 0, 0))  # over whole file
@@ -72,7 +66,6 @@ def compute_features(wav_path: str):
 def main():
     df = pd.read_csv(METADATA_IN)
 
-    # Ensure wav_path column exists
     if "wav_path" not in df.columns:
         raise ValueError("metadata.csv must contain a 'wav_path' column with full paths to .wav files.")
 
