@@ -6,29 +6,22 @@ import librosa
 import soundfile as sf
 from tqdm import tqdm
 
-# ========= CONFIG =========
-# Get the directory where the script is actually sitting
 current_dir = os.path.dirname(os.path.abspath(__file__))
 print(f"Current Working Directory: {current_dir}")
 
-# Folder where all 1152 .wav files live (can contain subfolders)
-DATA_DIR = os.path.join(current_dir, "data/wav")           # folder where all 1152 .wav files live (can contain subfolders)
+DATA_DIR = os.path.join(current_dir, "data/wav")          
 
-# Where to save .npy spectrograms
-OUT_SPEC_DIR = os.path.join(current_dir, "data/melspec")   # where to save .npy spectrograms
+OUT_SPEC_DIR = os.path.join(current_dir, "data/melspec")  
 
-# Where to save labels/metadata
 OUT_METADATA_CSV =os.path.join(current_dir, "data/metadata.csv")
 
-# Audio / mel-spectrogram parameters
-TARGET_SR = 16000        # resample to 16kHz
-N_MELS = 64              # number of mel bands
+TARGET_SR = 16000      
+N_MELS = 64             
 N_FFT = 1024
 HOP_LENGTH = 256
 
 os.makedirs(OUT_SPEC_DIR, exist_ok=True)
 
-# ========= UPDATED FILENAME PARSER =========
 """
 We handle filenames such as:
 - 1901_bof_n01c.wav          (black, older, female, neutral, sentence 01, suffix 'c')
@@ -58,7 +51,7 @@ FNAME_RE = re.compile(
 ETH_MAP = {
     "w": "white",
     "b": "black",
-    "a": "south_asian",  # or "asian" if you prefer that label
+    "a": "south_asian", 
 }
 
 AGE_MAP = {
@@ -108,20 +101,15 @@ def parse_filename(filename: str):
         "sex":      SEX_MAP.get(sex_code, "unknown"),
         "intent":   INTENT_MAP.get(intent_code, "unknown"),
         "sentence_id": sentence_id,
-        # You can store suffix if you want to inspect later:
         "suffix": m.group("suffix") or "",
     }
-
-
-# ========= AUDIO HELPERS =========
 
 def load_audio(path: str, target_sr: int = TARGET_SR):
     """
     Load audio and resample to target_sr.
     """
-    y, sr = sf.read(path)  # soundfile handles 16-bit wav nicely
+    y, sr = sf.read(path) 
     if y.ndim > 1:
-        # convert stereo to mono
         y = np.mean(y, axis=1)
     if sr != target_sr:
         y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
@@ -145,12 +133,8 @@ def audio_to_melspec(y, sr):
     return mel_db
 
 
-# ========= MAIN PIPELINE =========
-
 def main():
     records = []
-
-    # Find all wav files recursively
     wav_paths = []
     for root, dirs, files in os.walk(DATA_DIR):
         for fname in files:
@@ -162,14 +146,12 @@ def main():
     for wav_path in tqdm(wav_paths, desc="Processing audio"):
         fname = os.path.basename(wav_path)
 
-        # 1) Parse filename → labels
         try:
             meta = parse_filename(fname)
         except ValueError as e:
             print(f"Skipping file (name issue): {fname} ({e})")
             continue
 
-        # 2) Load & convert to mel-spectrogram
         try:
             y, sr = load_audio(wav_path, TARGET_SR)
             mel = audio_to_melspec(y, sr)
@@ -177,12 +159,10 @@ def main():
             print(f"Error processing {fname}: {e}")
             continue
 
-        # 3) Save spectrogram as .npy
         spec_fname = fname.replace(".wav", ".npy")
         spec_path = os.path.join(OUT_SPEC_DIR, spec_fname)
         np.save(spec_path, mel)
 
-        # 4) Build record for metadata
         record = {
             "wav_path": wav_path,
             "spec_path": spec_path,
@@ -196,7 +176,6 @@ def main():
         }
         records.append(record)
 
-    # 5) Save metadata CSV
     df = pd.DataFrame(records)
     df.to_csv(OUT_METADATA_CSV, index=False)
     print(f"Saved metadata with {len(df)} examples to {OUT_METADATA_CSV}")
