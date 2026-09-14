@@ -2,57 +2,44 @@ import os
 import random
 from typing import Tuple, List
 
-# Configure huggingface_hub cache BEFORE importing transformers
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Use the default transformers cache location (user's home directory)
-# This is more reliable than a custom path
 try:
     from pathlib import Path
-    # Default cache location used by transformers
     default_cache = Path.home() / ".cache" / "huggingface"
     hf_cache_dir = str(default_cache)
     os.makedirs(hf_cache_dir, exist_ok=True)
 except Exception:
-    # Fallback to local cache directory
     hf_cache_dir = os.path.join(current_dir, ".cache", "transformers")
     os.makedirs(hf_cache_dir, exist_ok=True)
 
 hf_cache_dir = os.path.abspath(hf_cache_dir)
 
-# Ensure cache directory is valid
 if not os.path.isdir(hf_cache_dir):
     raise RuntimeError(f"Could not create cache directory: {hf_cache_dir}")
 
-# Clean up any problematic environment variables
 for key in ["HF_HOME", "TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_DATASETS_CACHE"]:
     if key in os.environ:
         value = os.environ[key]
         if value is None or value == "" or not isinstance(value, str):
             del os.environ[key]
 
-# Set environment variables to valid string paths
 os.environ["HF_HOME"] = hf_cache_dir
 os.environ["TRANSFORMERS_CACHE"] = hf_cache_dir
 os.environ["HUGGINGFACE_HUB_CACHE"] = hf_cache_dir
 
-# Ensure token-related paths are set (even if empty) to avoid None issues
 if "HF_TOKEN" not in os.environ:
-    os.environ["HF_TOKEN"] = ""  # Empty string instead of None
+    os.environ["HF_TOKEN"] = ""  
 if "HUGGINGFACE_HUB_TOKEN" not in os.environ:
     os.environ["HUGGINGFACE_HUB_TOKEN"] = ""
 
-# Configure huggingface_hub if available (before importing transformers)
 try:
     import huggingface_hub
-    # Set the cache directory for huggingface_hub
     huggingface_hub.constants.HF_HUB_CACHE = hf_cache_dir
-    # Also try to set it in the file system
     if hasattr(huggingface_hub, 'file_download'):
-        # This ensures the cache is properly set
         pass
 except (ImportError, AttributeError):
-    pass  # huggingface_hub might not be available
+    pass  
 
 import numpy as np
 import pandas as pd
@@ -65,7 +52,6 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import accuracy_score, classification_report
 
 from transformers import AutoProcessor, AutoModel
-# Also import WavLM-specific classes as fallback
 try:
     from transformers import WavLMModel, WavLMProcessor
     WAVLM_AVAILABLE = True
@@ -74,8 +60,6 @@ except ImportError:
     WavLMModel = None
     WavLMProcessor = None
 
-# Aggressively patch transformers to handle None paths
-# This fixes the NoneType error when transformers tries to access internal paths
 def patch_transformers_paths():
     """Patch transformers to replace None paths with valid cache directory"""
     try:
@@ -93,8 +77,7 @@ def patch_transformers_paths():
                 file_utils.default_cache_path = hf_cache_dir
     except (AttributeError, ImportError):
         pass
-    
-    # Patch the cached_path function to handle None
+
     try:
         from transformers.utils import cached_path
         original_cached_path = cached_path
@@ -102,23 +85,19 @@ def patch_transformers_paths():
         def patched_cached_path(path_or_repo_id, *args, **kwargs):
             if path_or_repo_id is None:
                 raise ValueError("Path cannot be None")
-            # If cache_dir is None in kwargs, set it to our cache dir
             if 'cache_dir' in kwargs and kwargs['cache_dir'] is None:
                 kwargs['cache_dir'] = hf_cache_dir
             elif 'cache_dir' not in kwargs:
                 kwargs['cache_dir'] = hf_cache_dir
             return original_cached_path(path_or_repo_id, *args, **kwargs)
         
-        # Replace the function
         import transformers.utils
         transformers.utils.cached_path = patched_cached_path
     except (AttributeError, ImportError):
         pass
 
-# Apply patches
 patch_transformers_paths()
 
-# Wrap from_pretrained methods to handle NoneType errors
 def wrap_from_pretrained(original_method):
     """Wrapper for from_pretrained that handles NoneType errors"""
     def wrapped(*args, **kwargs):
@@ -126,7 +105,6 @@ def wrap_from_pretrained(original_method):
             return original_method(*args, **kwargs)
         except TypeError as e:
             if "NoneType" in str(e) or "expected str" in str(e):
-                # Try to fix None values in kwargs
                 fixed_kwargs = {}
                 for key, value in kwargs.items():
                     if value is None and key in ['cache_dir', 'token', 'local_files_only']:
@@ -139,46 +117,38 @@ def wrap_from_pretrained(original_method):
                     else:
                         fixed_kwargs[key] = value
                 
-                # Also ensure cache_dir is set if not provided
                 if 'cache_dir' not in fixed_kwargs:
                     fixed_kwargs['cache_dir'] = hf_cache_dir
                 
-                # Retry with fixed kwargs
                 try:
                     return original_method(*args, **fixed_kwargs)
                 except Exception:
-                    # If that still fails, try with just cache_dir
                     kwargs['cache_dir'] = hf_cache_dir
                     return original_method(*args, **kwargs)
             else:
                 raise
     return wrapped
 
-# Patch AutoProcessor and AutoModel
 try:
     AutoProcessor.from_pretrained = wrap_from_pretrained(AutoProcessor.from_pretrained)
     AutoModel.from_pretrained = wrap_from_pretrained(AutoModel.from_pretrained)
 except:
     pass
 
-# Try to set transformers' internal cache path directly
 try:
     import transformers
-    # Set the default cache path in multiple places
     if hasattr(transformers, 'TRANSFORMERS_CACHE'):
         transformers.TRANSFORMERS_CACHE = hf_cache_dir
 except (AttributeError, ImportError):
     pass
 
-# Aggressively patch os.path.join to handle None values from transformers
-# This is a workaround for the transformers 4.57.3 bug
+
 import os.path as _original_os_path_module
 import inspect
 _original_join = _original_os_path_module.join
 
 def _safe_join(*args):
     """os.path.join wrapper that replaces None with cache directory for transformers"""
-    # Check call stack to see if this is from transformers/huggingface
     try:
         stack = inspect.stack()
         is_transformers_call = any(
@@ -188,33 +158,27 @@ def _safe_join(*args):
     except:
         is_transformers_call = False
     
-    # Filter None values
     filtered = []
     for arg in args:
         if arg is None:
             if is_transformers_call:
-                # Replace None with cache directory for transformers calls
                 filtered.append(hf_cache_dir)
             else:
-                # For other code, preserve original behavior (raise error)
                 return _original_join(*args)
         else:
             filtered.append(arg)
     
     return _original_join(*filtered)
 
-# Patch os.path.join - this will affect all code but only replace None for transformers
 import os
 os.path.join = _safe_join
 _original_os_path_module.join = _safe_join
 
-# Patch os.fspath which transformers uses for path validation
-# This is where the "expected str, bytes or os.PathLike object, not NoneType" error comes from
 _original_fspath = os.fspath
 def _safe_fspath(path):
     """os.fspath wrapper that replaces None with cache directory for transformers"""
     if path is None:
-        # Check if we're in transformers context
+
         try:
             import inspect
             stack = inspect.stack()
@@ -226,22 +190,18 @@ def _safe_fspath(path):
                 return hf_cache_dir
         except:
             pass
-        # If not transformers, preserve original behavior
         return _original_fspath(path)
     return _original_fspath(path)
 
 os.fspath = _safe_fspath
 
-
-# ========= CONFIG =========
-# current_dir is already defined above (before imports)
 print(f"Current Working Directory: {current_dir}")
 print(f"HuggingFace cache directory: {hf_cache_dir}")
 
-METADATA_CSV = os.path.join(current_dir, "data/metadata_acoustic.csv")   # output from step 1
+METADATA_CSV = os.path.join(current_dir, "data/metadata_acoustic.csv") 
 
-MODEL_NAME = "microsoft/wavlm-base-plus"       # good for speech paralinguistics
-TARGET_SR = 16000                              # wavlm expects 16kHz
+MODEL_NAME = "microsoft/wavlm-base-plus"     
+TARGET_SR = 16000                             
 BATCH_SIZE = 8
 NUM_EPOCHS = 10
 LR = 1e-4
@@ -260,8 +220,6 @@ def set_seed(seed: int = 42):
 
 set_seed(RANDOM_SEED)
 
-
-# ========= SPLIT / LABEL UTILS =========
 def make_speaker_splits(df: pd.DataFrame,
                         train_ratio=0.7,
                         val_ratio=0.15,
@@ -299,25 +257,21 @@ def intent_to_label(intent: str) -> int:
         raise ValueError(f"Unknown intent: {intent}")
 
 
-# ========= DATASET =========
 ACOUSTIC_FEATURE_COLS = ["duration_sec", "f0_mean_hz", "f0_std_hz", "hnr_mean_db"]
 
 
 class HybridTrustDataset(Dataset):
     def __init__(self, df: pd.DataFrame):
         self.df = df.reset_index(drop=True)
-        
-        # Check for required acoustic feature columns
+
         missing_cols = [col for col in ACOUSTIC_FEATURE_COLS if col not in self.df.columns]
         if missing_cols:
             raise ValueError(f"Missing acoustic feature columns: {missing_cols}. Please run step 3 (3_extract_acoustic_features.py) first.")
 
-        # Replace NaNs in acoustic features with column means
         self.df[ACOUSTIC_FEATURE_COLS] = self.df[ACOUSTIC_FEATURE_COLS].fillna(
             self.df[ACOUSTIC_FEATURE_COLS].mean()
         )
 
-        # Normalize acoustic features (fit on full df for simplicity)
         self.means = self.df[ACOUSTIC_FEATURE_COLS].mean()
         self.stds = self.df[ACOUSTIC_FEATURE_COLS].std().replace(0, 1.0)
 
@@ -327,12 +281,10 @@ class HybridTrustDataset(Dataset):
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
         wav_path = row["wav_path"]
-        
-        # Check if audio file exists
+
         if not os.path.exists(wav_path):
             raise FileNotFoundError(f"Audio file not found: {wav_path}")
 
-        # Load audio, resample to 16kHz, mono
         try:
             y, sr = sf.read(wav_path)
         except Exception as e:
@@ -343,7 +295,6 @@ class HybridTrustDataset(Dataset):
         if sr != TARGET_SR:
             y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR)
 
-        # Acoustic features
         feats = row[ACOUSTIC_FEATURE_COLS].values.astype(np.float32)
         feats_norm = (feats - self.means.values) / (self.stds.values + 1e-9)
 
@@ -371,8 +322,6 @@ def collate_fn(batch: List):
 
     return audios, feats_tensor, labels_tensor
 
-
-# ========= HYBRID MODEL (WavLM + acoustic MLP) =========
 class WavLMHybridClassifier(nn.Module):
     def __init__(self, wavlm_hidden_dim: int, acoustic_dim: int, num_classes: int = 2):
         super().__init__()
@@ -396,15 +345,13 @@ class WavLMHybridClassifier(nn.Module):
         return logits
 
 
-# ========= TRAIN / EVAL FUNCTIONS =========
 def train_one_epoch(model, wavlm_model, processor, loader, optimizer, criterion):
     model.train()
-    wavlm_model.eval()  # we keep WavLM frozen
+    wavlm_model.eval()  
     running_loss = 0.0
     all_preds, all_labels = [], []
 
     for audios, feats, labels in loader:
-        # Process audio with WavLM processor (handles padding)
         inputs = processor(
             audios,
             sampling_rate=TARGET_SR,
@@ -412,15 +359,13 @@ def train_one_epoch(model, wavlm_model, processor, loader, optimizer, criterion)
             padding=True,
         )
 
-        input_values = inputs["input_values"].to(DEVICE)  # [B, T]
+        input_values = inputs["input_values"].to(DEVICE)
         attention_mask = inputs["attention_mask"].to(DEVICE)
 
         with torch.no_grad():
             outputs = wavlm_model(input_values=input_values, attention_mask=attention_mask)
-            hidden_states = outputs.last_hidden_state  # [B, T, H]
-            # Mean-pool over time axis
-            wavlm_embeds = hidden_states.mean(dim=1)  # [B, H]
-
+            hidden_states = outputs.last_hidden_state  
+            wavlm_embeds = hidden_states.mean(dim=1)  
         feats = feats.to(DEVICE)
         labels = labels.to(DEVICE)
 
@@ -460,8 +405,8 @@ def eval_model(model, wavlm_model, processor, loader, criterion) -> Tuple[float,
             attention_mask = inputs["attention_mask"].to(DEVICE)
 
             outputs = wavlm_model(input_values=input_values, attention_mask=attention_mask)
-            hidden_states = outputs.last_hidden_state  # [B, T, H]
-            wavlm_embeds = hidden_states.mean(dim=1)   # [B, H]
+            hidden_states = outputs.last_hidden_state  
+            wavlm_embeds = hidden_states.mean(dim=1) 
 
             feats = feats.to(DEVICE)
             labels = labels.to(DEVICE)
@@ -480,7 +425,6 @@ def eval_model(model, wavlm_model, processor, loader, criterion) -> Tuple[float,
     return epoch_loss, epoch_acc, np.array(all_labels), np.array(all_preds)
 
 
-# ========= FAIRNESS / DEMOGRAPHIC ANALYSIS =========
 def group_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray, group_col: str):
     """
     df: test dataframe aligned with y_true/y_pred rows
@@ -509,28 +453,22 @@ def group_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray, grou
         print(f"{group_col} = {group_value:12s} | N = {len(subset):3d} | Accuracy = {acc:.3f}")
 
 
-# ========= MAIN =========
 def main():
-    # Cache directory is already set up at module level (before imports)
-    # 1) Load metadata with acoustic features
     if not os.path.exists(METADATA_CSV):
         raise FileNotFoundError(f"Metadata file not found: {METADATA_CSV}. Please run step 3 (3_extract_acoustic_features.py) first.")
     
     df = pd.read_csv(METADATA_CSV)
-    
-    # Check for required columns
+
     required_cols = ["wav_path", "intent", "speaker_id"] + ACOUSTIC_FEATURE_COLS
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns in metadata: {missing_cols}")
 
-    # Keep only valid labels
     df = df[df["intent"].isin(["neutral", "trustworthy"])]
     
     if len(df) == 0:
         raise ValueError("No valid samples found with 'neutral' or 'trustworthy' intent labels.")
 
-    # 2) Create splits by speaker_id (speaker-independent)
     df = make_speaker_splits(df, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15)
     print("Split distribution:")
     print(df["split"].value_counts())
@@ -539,7 +477,6 @@ def main():
     val_df   = df[df["split"] == "val"]
     test_df  = df[df["split"] == "test"]
 
-    # 3) Create datasets and loaders
     train_dataset = HybridTrustDataset(train_df)
     val_dataset   = HybridTrustDataset(val_df)
     test_dataset  = HybridTrustDataset(test_df)
@@ -548,21 +485,18 @@ def main():
     val_loader   = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
     test_loader  = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
-    # 4) Load WavLM + processor
     print("Loading WavLM model…")
     print(f"Cache directory: {hf_cache_dir}")
     print(f"Cache dir exists: {os.path.exists(hf_cache_dir)}")
     print(f"Cache dir is directory: {os.path.isdir(hf_cache_dir)}")
     print(f"HF_HOME: {os.environ.get('HF_HOME', 'Not set')}")
     print(f"TRANSFORMERS_CACHE: {os.environ.get('TRANSFORMERS_CACHE', 'Not set')}")
-    
-    # Check transformers version and warn about known bug
+
     try:
         import transformers
         tf_version = transformers.__version__
         print(f"Transformers version: {tf_version}")
-        
-        # Check if this is the problematic version
+
         if tf_version.startswith("4.57"):
             print("\n" + "="*60)
             print("WARNING: You are using transformers 4.57.x which has a known")
@@ -575,26 +509,21 @@ def main():
             print("="*60 + "\n")
     except:
         pass
-    
-    # Validate cache directory one more time
+
     if not os.path.isdir(hf_cache_dir):
         raise RuntimeError(f"Cache directory is not valid: {hf_cache_dir}")
-    
-    # Ensure hf_cache_dir is a string (not None, not Path object)
+
     cache_dir_str = str(os.path.abspath(hf_cache_dir))
     assert os.path.isdir(cache_dir_str), f"Cache directory must exist: {cache_dir_str}"
-    
-    # First, check if model files are already cached and try loading with local_files_only
-    # This might bypass the path resolution bug
+
     print("Checking for cached model files...")
     try:
         from huggingface_hub import snapshot_download
-        # Try to find cached model
         try:
             cached_path = snapshot_download(
                 repo_id=MODEL_NAME,
                 cache_dir=cache_dir_str,
-                local_files_only=True  # Only use cached files
+                local_files_only=True  
             )
             if cached_path and os.path.isdir(cached_path):
                 print(f"Found cached model at: {cached_path}")
@@ -603,7 +532,6 @@ def main():
                     processor = AutoProcessor.from_pretrained(cached_path, local_files_only=True)
                     wavlm_model = AutoModel.from_pretrained(cached_path, local_files_only=True).to(DEVICE)
                     print("Model loaded successfully from cache!")
-                    # Skip to training section
                     model_loaded = True
                 except Exception as cache_error:
                     print(f"Error loading from cache: {cache_error}")
@@ -611,25 +539,18 @@ def main():
             else:
                 model_loaded = False
         except Exception:
-            # No cached files, need to download
             model_loaded = False
     except ImportError:
         model_loaded = False
     
     if not model_loaded:
-        # Try a simpler approach: let transformers handle download/cache naturally
-        # This might avoid the path resolution bug
         print("Attempting to load model directly (letting transformers handle cache)...")
         print("This may take a few minutes on first run as it downloads the model.")
         
     try:
-        # Try loading without any local_files_only or cache_dir parameters
-        # Let transformers use its default cache mechanism
         print("Loading processor (this will download the model if not cached)...")
         print("This may take a few minutes on first run.")
         
-        # For WavLM models, try using Wav2Vec2FeatureExtractor first (WavLM is based on Wav2Vec2)
-        # This avoids the tokenizer loading issue
         try:
             from transformers import Wav2Vec2FeatureExtractor
             processor = Wav2Vec2FeatureExtractor.from_pretrained(MODEL_NAME, resume_download=True)
@@ -649,7 +570,6 @@ def main():
         print("Model loaded successfully.")
         
     except (TypeError, ValueError, OSError) as e:
-        # Handle NoneType errors or tokenizer loading errors
         if "NoneType" in str(e) or "expected str" in str(e) or "Can't load tokenizer" in str(e) or "tokenizer" in str(e).lower():
             print(f"Error with default loading: {e}")
             print("Trying with explicit cache_dir...")
@@ -659,7 +579,6 @@ def main():
                 print("Model loaded successfully with explicit cache_dir.")
             except Exception as e2:
                 if "NoneType" in str(e2) or "expected str" in str(e2) or "Can't load tokenizer" in str(e2) or "tokenizer" in str(e2).lower():
-                    # Try using Wav2Vec2FeatureExtractor (WavLM is based on Wav2Vec2 and doesn't use tokenizer)
                     print(f"Error with explicit cache_dir: {e2}")
                     print("Trying Wav2Vec2FeatureExtractor (WavLM doesn't use tokenizer)...")
                     try:
@@ -669,7 +588,6 @@ def main():
                         print("Model loaded successfully using Wav2Vec2FeatureExtractor.")
                     except (ImportError, Exception) as feat_err:
                         print(f"Error with Wav2Vec2FeatureExtractor: {feat_err}")
-                        # Try Wav2Vec2Processor as fallback
                         try:
                             from transformers import Wav2Vec2Processor
                             processor = Wav2Vec2Processor.from_pretrained(MODEL_NAME, cache_dir=cache_dir_str, resume_download=True)
@@ -677,10 +595,8 @@ def main():
                             print("Model loaded successfully using Wav2Vec2Processor.")
                         except (ImportError, Exception) as proc_err:
                             print(f"Error with Wav2Vec2Processor: {proc_err}")
-                            # Continue to next fallback
                             pass
-                    
-                    # Final fallback: try downloading with huggingface_hub first
+
                     print("Trying alternative: download with huggingface_hub first...")
                     try:
                         from huggingface_hub import snapshot_download
@@ -692,16 +608,13 @@ def main():
                         )
                         local_model_path = str(os.path.abspath(local_model_path))
                         print(f"Files downloaded to: {local_model_path}")
-                        
-                        # Verify required files exist
+
                         required_files = ["config.json", "preprocessor_config.json"]
                         missing = [f for f in required_files if not os.path.exists(os.path.join(local_model_path, f))]
                         if missing:
                             print(f"Warning: Some files may be missing: {missing}")
-                        
-                        # Try loading from the downloaded path
+
                         print("Loading from downloaded files...")
-                        # Try using Wav2Vec2FeatureExtractor first (WavLM is based on Wav2Vec2 and doesn't use tokenizer)
                         try:
                             from transformers import Wav2Vec2FeatureExtractor
                             processor = Wav2Vec2FeatureExtractor.from_pretrained(local_model_path, local_files_only=True)
@@ -709,7 +622,6 @@ def main():
                             print("Model loaded successfully using Wav2Vec2FeatureExtractor (local_files_only).")
                         except (ImportError, Exception) as feat_err:
                             print(f"Error with Wav2Vec2FeatureExtractor: {feat_err}")
-                            # Try Wav2Vec2Processor
                             try:
                                 from transformers import Wav2Vec2Processor
                                 processor = Wav2Vec2Processor.from_pretrained(local_model_path, local_files_only=True)
@@ -717,20 +629,17 @@ def main():
                                 print("Model loaded successfully using Wav2Vec2Processor (local_files_only).")
                             except (ImportError, Exception) as proc_err:
                                 print(f"Error with Wav2Vec2Processor: {proc_err}")
-                                # Try AutoProcessor with local_files_only
                                 try:
                                     processor = AutoProcessor.from_pretrained(local_model_path, local_files_only=True)
                                     wavlm_model = AutoModel.from_pretrained(local_model_path, local_files_only=True).to(DEVICE)
                                     print("Model loaded successfully from downloaded path (local_files_only).")
                                 except Exception as local_err:
                                     print(f"Error with local_files_only: {local_err}")
-                                    # Try without local_files_only (may need to download additional files)
                                     print("Trying without local_files_only (may download additional files)...")
                                     processor = AutoProcessor.from_pretrained(local_model_path, resume_download=True)
                                     wavlm_model = AutoModel.from_pretrained(local_model_path, resume_download=True).to(DEVICE)
                                     print("Model loaded successfully from downloaded path.")
                     except Exception as e3:
-                        # All attempts have failed - provide clear error message
                         error_msg = (
                             f"\n{'='*70}\n"
                             f"CRITICAL ERROR: Model Loading Failed\n"
@@ -756,7 +665,6 @@ def main():
         else:
             raise
     except ImportError as import_err:
-            # If huggingface_hub import fails in the nested try, handle it
             if "snapshot_download" in str(import_err) or "huggingface_hub" in str(import_err):
                 print("huggingface_hub not available, trying direct loading...")
                 try:
@@ -794,7 +702,6 @@ def main():
             else:
                 raise
     except Exception as e:
-        # Catch any other unexpected errors
         error_str = str(e)
         if "tokenizer" in error_str.lower() or "Can't load" in error_str:
             error_msg = (
@@ -827,7 +734,6 @@ def main():
             )
         raise RuntimeError(error_msg)
 
-    # Freeze WavLM – we only train the classifier
     for param in wavlm_model.parameters():
         param.requires_grad = False
 
@@ -838,7 +744,6 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(classifier.parameters(), lr=LR)
 
-    # 5) Train loop
     best_val_acc = 0.0
     best_state = None
 
@@ -859,14 +764,12 @@ def main():
     if best_state is not None:
         classifier.load_state_dict(best_state)
 
-    # 6) Final evaluation on test set
     test_loss, test_acc, y_true, y_pred = eval_model(classifier, wavlm_model, processor, test_loader, criterion)
     print("\n=== HYBRID MODEL – TEST RESULTS ===")
     print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.3f}")
     print("\nClassification report (0=neutral, 1=trustworthy):")
     print(classification_report(y_true, y_pred, target_names=["neutral", "trustworthy"]))
 
-    # 7) Fairness / group analysis
     for group_col in ["ethnicity", "age_group", "sex"]:
         group_metrics(test_df, y_true, y_pred, group_col)
 
