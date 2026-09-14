@@ -1,22 +1,3 @@
-
-# Echoes of Equity: DANN-Trust ablation study (Section 6.7, Table 8).
-#
-# Runs DANN with one component removed per configuration, on the SAME
-# fixed 80/20 split and the SAME 5 seeds as compare_all_models.py, so
-# every row of Table 8 is directly comparable to the full-DANN row of
-# Table 3.
-#
-# Variants:
-#   dann_full       : reference (identical to run_dann in the main harness)
-#   dann_no_grl     : GRL replaced with tf.identity => multi-task learner
-#   dann_no_domain  : domain head deleted => ANN with 2-layer encoder (128 -> 32)
-#   dann_no_bn      : BatchNormalization removed from encoder
-#   dann_top15      : input restricted to the 15 highest-Gini RF features
-#
-# Output: ablation_results.json (mean +/- std of Acc, AUC and Δeth per variant).
-# The "top-15 features only" variant reads RF feature importances from the
-# main results.json produced by compare_all_models.py; run that first.
-
 import os
 import json
 import numpy as np
@@ -30,9 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-# 50 seeds to match compare_all_models.py so Table 8 rows are directly
-# comparable to Table 3 rows.  Set back to list(range(42, 67)) or
-# list(range(42, 47)) for smaller runs.
+
 SEEDS = list(range(42, 92))
 SPLIT_SEED = 42
 EPOCHS = 80
@@ -46,11 +25,6 @@ CSV_PATH = os.path.normpath(os.path.join(
 RESULTS_JSON = os.path.join(SCRIPT_DIR, "results.json")
 OUT_JSON = os.path.join(SCRIPT_DIR, "ablation_results.json")
 
-
-# ----------------------------------------------------------------------------
-# Gradient Reversal Layer (same as compare_all_models.py -- duplicated to keep
-# this script runnable without triggering the full 5-model harness on import).
-# ----------------------------------------------------------------------------
 @tf.custom_gradient
 def _grl_op(x, lam):
     def grad(dy):
@@ -82,10 +56,6 @@ class LambdaScheduler(tf.keras.callbacks.Callback):
         self.grl.set_lambda(self.lam_max * (2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0))
 
 
-# ----------------------------------------------------------------------------
-# Shared data loading (mirror of compare_all_models.py so this script stands
-# alone; importing that module would run the full 5-model comparison).
-# ----------------------------------------------------------------------------
 print(f"Loading {CSV_PATH}")
 df = pd.read_csv(CSV_PATH)
 
@@ -141,9 +111,6 @@ def _eval(probs):
     }
 
 
-# ----------------------------------------------------------------------------
-# Encoder builders.  Kept small and explicit so each ablation reads at a glance.
-# ----------------------------------------------------------------------------
 def _encoder(inp, use_bn=True):
     """DANN encoder: Dense 128 -> [BN] -> Dropout -> Dense 32 -> [BN]."""
     h = Dense(128, activation="relu")(inp)
@@ -168,9 +135,6 @@ def _domain_head(enc, num_classes):
     return Dense(num_classes, activation="softmax", name="domain_output")(d)
 
 
-# ----------------------------------------------------------------------------
-# Ablation variants.  Each returns test-set probabilities on the trust class.
-# ----------------------------------------------------------------------------
 def run_dann_full(seed, X_tr_v=None, X_te_v=None, input_dim=None):
     _seed_all(seed)
     input_dim = input_dim or INPUT_DIM
@@ -201,7 +165,7 @@ def run_dann_no_grl(seed):
     inp = Input(shape=(INPUT_DIM,))
     enc = _encoder(inp, use_bn=True)
     trust_out = _trust_head(enc)
-    dom_out = _domain_head(enc, NUM_ETH)   # <-- direct connection, no GRL
+    dom_out = _domain_head(enc, NUM_ETH)
     m = Model(inp, [trust_out, dom_out])
     m.compile(
         optimizer=tf.keras.optimizers.Adam(1e-3),
@@ -273,9 +237,6 @@ def run_dann_top15(seed, top_idx):
     return run_dann_full(seed, X_tr_v=X_tr_t, X_te_v=X_te_t, input_dim=len(top_idx))
 
 
-# ----------------------------------------------------------------------------
-# Run every variant across every seed.
-# ----------------------------------------------------------------------------
 top_idx = _top_k_feature_indices(15)
 top_names = [FEATURE_NAMES[i] for i in top_idx]
 print(f"Top-15 features (mean RF Gini): {top_names}")
@@ -289,14 +250,10 @@ VARIANTS = [
 ]
 
 ablation = {}
-# Resume support: if a prior run finished some variants (with the SAME SEEDS
-# list), keep them and skip. Delete ablation_results.json to force a full
-# rerun. A stale cache with a different seed count is detected and rejected.
 if os.path.exists(OUT_JSON):
     try:
         with open(OUT_JSON) as f:
             prior = json.load(f)
-        # Only reuse entries whose recorded seed list matches ours exactly.
         for k, v in prior.items():
             if k.startswith("_"):
                 continue
@@ -330,16 +287,12 @@ for name, fn in VARIANTS:
         "gap_pp_mean": float(np.mean(gaps)), "gap_pp_std": float(np.std(gaps)),
         "raw_per_seed": per_seed,
     }
-    # Persist after every variant so a crash/interrupt doesn't lose progress.
     ablation["_top15_feature_indices"] = [int(i) for i in top_idx]
     ablation["_top15_feature_names"] = top_names
     with open(OUT_JSON, "w") as f:
         json.dump(ablation, f, indent=2)
     print(f"[saved] {OUT_JSON}")
 
-# ----------------------------------------------------------------------------
-# Table 8 (mean +/- std) to stdout.
-# ----------------------------------------------------------------------------
 print("\n" + "=" * 88)
 print(f"TABLE 8: DANN-Trust ablation  (mean +/- std over {len(SEEDS)} seeds; split seed=42)")
 print("=" * 88)
@@ -355,11 +308,6 @@ for name, r in ablation.items():
         f"{r['gap_pp_mean']:>8.2f}pp +/-{r['gap_pp_std']:4.2f}"
     )
 
-# ----------------------------------------------------------------------------
-# Levene's test: is dann_full's fairness-gap VARIANCE actually different from
-# each ablation variant? p<0.05 => yes.  scipy ships as a scikit-learn dep,
-# so it's already available.
-# ----------------------------------------------------------------------------
 try:
     from scipy import stats
 except ImportError:
@@ -374,13 +322,6 @@ else:
         ("dann_full", "dann_no_bn"),
         ("dann_full", "dann_top15"),
     ]
-
-    # ----------------------------------------------------------------------
-    # Mann-Whitney U on GAP MEAN and ACCURACY MEAN.  The ablation's most
-    # important finding (dann_no_bn dominates dann_full on both metrics)
-    # only becomes a paper-defensible claim once MEANS are statistically
-    # tested; Levene's below only covers VARIANCE of the fairness gap.
-    # ----------------------------------------------------------------------
     def _accs(name):
         return [r["acc"] for r in ablation[name]["raw_per_seed"]]
 
